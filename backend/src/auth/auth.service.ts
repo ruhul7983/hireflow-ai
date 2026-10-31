@@ -137,7 +137,6 @@ export class AuthService {
           email: true,
           name: true,
           role: true, // 👈 CRITICAL FIX: Explicitly fetching role for client-side guards
-          outletId: true,
           createdAt: true,
         },
       });

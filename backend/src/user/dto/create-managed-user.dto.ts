@@ -2,7 +2,6 @@ import {
   IsEmail,
   IsNotEmpty,
   IsEnum,
-  IsOptional,
   IsString,
   MinLength,
 } from 'class-validator';
@@ -22,8 +21,4 @@ export class CreateManagedUserDto {
 
   @IsEnum(Role, { message: 'Invalid assignment role' })
   role: Role;
-
-  @IsOptional()
-  @IsString()
-  outletId?: string; // Optional: Left blank for global admins, filled for outlet managers
 }

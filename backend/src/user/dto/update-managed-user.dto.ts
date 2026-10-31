@@ -24,8 +24,4 @@ export class UpdateManagedUserDto {
   @IsOptional()
   @IsEnum(Role, { message: 'Invalid assignment role' })
   role?: Role;
-
-  @IsOptional()
-  @IsString()
-  outletId?: string;
 }

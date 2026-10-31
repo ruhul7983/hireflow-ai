@@ -39,14 +39,12 @@ export class DatabaseAuthGuard implements CanActivate {
       // 3. Query DB to confirm the token exists and is valid
       const session = await this.prisma.userToken.findUnique({
         where: { accessToken: token },
-        // Fixed: Included outletId in the select statement so it becomes available to the request context
         include: {
           user: {
             select: {
               id: true,
               email: true,
               role: true,
-              outletId: true,
             },
           },
         },

@@ -76,7 +76,6 @@ export class UserService {
         name: dto.name,
         password: hashedPassword,
         role: dto.role,
-        outletId: dto.outletId || null,
       },
     });
 
@@ -112,7 +111,6 @@ export class UserService {
           email: true,
           name: true,
           role: true,
-          outletId: true,
           createdAt: true,
         },
         orderBy: { createdAt: 'desc' },
