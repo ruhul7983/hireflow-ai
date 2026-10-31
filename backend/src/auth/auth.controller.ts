@@ -12,7 +12,6 @@ import {
 import * as express from 'express';
 import { AuthService } from './auth.service';
 import { LoginDto } from './dto/login.dto';
-import { RegisterDto } from './dto/register.dto';
 import { Cookies } from './decorators/cookies.decorator';
 
 @Controller('auth')
@@ -44,15 +43,6 @@ export class AuthController {
     });
   }
 
-  @Post('register')
-  async register(
-    @Body() registerDto: RegisterDto,
-    @Res({ passthrough: true }) res: express.Response,
-  ) {
-    const tokens = await this.authService.register(registerDto);
-    this.setAuthCookies(res, tokens.access_token, tokens.refresh_token);
-    return { success: true, message: 'Account registered successfully' };
-  }
   @Get('me')
   async getMe(@Cookies('access_token') accessToken: string | undefined) {
     if (!accessToken) {
@@ -96,6 +86,7 @@ export class AuthController {
   @HttpCode(HttpStatus.OK)
   async logout(
     @Cookies('access_token') accessToken: string | undefined,
+    @Cookies('refresh_token') refreshToken: string | undefined,
     @Res({ passthrough: true }) res: express.Response,
   ) {
     // 1. Immediately wipe both target cookies from browser storage containers
@@ -103,8 +94,8 @@ export class AuthController {
     res.clearCookie('refresh_token');
 
     // 2. Purge the matching track record row out of PostgreSQL if present
-    if (accessToken) {
-      await this.authService.logout(accessToken);
+    if (accessToken || refreshToken) {
+      await this.authService.logout(accessToken, refreshToken);
     }
 
     return { success: true, message: 'Logged out successfully' };

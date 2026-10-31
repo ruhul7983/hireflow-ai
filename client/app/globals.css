@@ -1,14 +1,26 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@theme inline {
+  --color-forest: #064e3a;
+  --color-cream: #f8e7c9;
+  --font-sans: var(--font-geist-sans);
+  --font-display: var(--font-fraunces);
 }
 
-
+:root {
+  --background: #f8e7c9;
+  --foreground: #064e3a;
+}
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
+}
+
+/* Stops browser autofill from painting its own colours over the fields */
+input:-webkit-autofill {
+  -webkit-text-fill-color: var(--foreground);
+  box-shadow: 0 0 0 100px var(--background) inset;
+  caret-color: var(--foreground);
 }
