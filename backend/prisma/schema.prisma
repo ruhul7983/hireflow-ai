@@ -61,6 +61,10 @@ enum CardType {
   SOURCING_PROGRESS
   CANDIDATE_TABLE
   CANDIDATE_DECISION
+  CAMPAIGN_PROPOSAL
+  CAMPAIGN_DRAFTS
+  CAMPAIGN_PROGRESS
+  QUESTION
 }
 
 enum RemotePolicy {
@@ -78,6 +82,8 @@ enum PendingActionType {
   CREATE_JOB
   START_SOURCING
   DECIDE_CANDIDATES
+  CREATE_CAMPAIGN
+  SEND_CAMPAIGN
 }
 
 enum PendingActionStatus {
@@ -126,19 +132,25 @@ enum ActivityType {
   SOURCING_STARTED
   SOURCING_FINISHED
   CANDIDATE_STATUS_CHANGED
+  CAMPAIGN_CREATED
+  CAMPAIGN_APPROVED
+  EMAIL_SENT
 }
 
 enum CampaignStatus {
+  DRAFTING
   DRAFT
-  APPROVED
   SENDING
   PAUSED
   COMPLETED
+  CANCELLED
+  FAILED
 }
 
 enum EmailStatus {
   DRAFT
   APPROVED
+  SENDING
   SENT
   FAILED
 }
@@ -156,6 +168,12 @@ enum ReplyDraftStatus {
   APPROVED
   SENT
   DISCARDED
+}
+
+enum QuestionStatus {
+  PENDING
+  ANSWERED
+  CANCELLED
 }
 
 enum MeetingStatus {
@@ -178,6 +196,7 @@ model Conversation {
   messages       Message[]
   pendingActions PendingAction[]
   jobDrafts      JobDraft[]
+  questions      AgentQuestion[]
 
   @@index([userId, updatedAt])
 }
@@ -199,6 +218,10 @@ model Message {
   sourcingRun     SourcingRun?   @relation(fields: [sourcingRunId], references: [id], onDelete: SetNull)
   pendingActionId String?
   pendingAction   PendingAction? @relation(fields: [pendingActionId], references: [id], onDelete: SetNull)
+  campaignId      String?
+  campaign        Campaign?      @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  questionId      String?
+  question        AgentQuestion? @relation(fields: [questionId], references: [id], onDelete: SetNull)
 
   @@index([conversationId, createdAt])
 }
@@ -271,6 +294,14 @@ model PendingAction {
   decision       CandidateStatus?
   createdAt      DateTime            @default(now())
   resolvedAt     DateTime?
+
+  // Campaign details wait here until the recruiter confirms the proposal
+  campaignId   String?
+  campaign     Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  campaignName String?
+  dayOffsets   Int[]
+  dailyLimit   Int?
+  instructions String?   @db.Text
 
   candidates PendingActionCandidate[]
   messages   Message[]
@@ -361,17 +392,23 @@ model ActivityLog {
 }
 
 model Campaign {
-  id         String         @id @default(uuid())
-  jobId      String
-  job        Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
-  name       String
-  status     CampaignStatus @default(DRAFT)
-  dailyLimit Int            @default(50)
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
+  id             String         @id @default(uuid())
+  jobId          String
+  job            Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  conversationId String
+  name           String
+  status         CampaignStatus @default(DRAFTING)
+  dailyLimit     Int            @default(50)
+  instructions   String?        @db.Text
+  senderName     String
+  error          String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
 
-  steps      CampaignStep[]
-  recipients CampaignRecipient[]
+  steps          CampaignStep[]
+  recipients     CampaignRecipient[]
+  messages       Message[]
+  pendingActions PendingAction[]
 
   @@index([jobId])
 }
@@ -382,8 +419,6 @@ model CampaignStep {
   campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   position   Int
   dayOffset  Int
-  subject    String
-  body       String   @db.Text
 
   emails OutboundEmail[]
 
@@ -410,12 +445,16 @@ model OutboundEmail {
   subject        String
   body           String       @db.Text
   status         EmailStatus  @default(DRAFT)
+  dueAt          DateTime?
   sentAt         DateTime?
+  messageId      String?
+  previewUrl     String?
+  error          String?
   createdAt      DateTime     @default(now())
 
   // Guarantees no candidate can ever receive the same step twice
   @@unique([campaignStepId, candidateId])
-  @@index([status, sentAt])
+  @@index([status, dueAt])
 }
 
 model CandidateReply {
@@ -442,4 +481,66 @@ model Meeting {
   updatedAt   DateTime      @updatedAt
 
   @@index([candidateId])
+}
+
+// A paused LangGraph run waiting on the recruiter. The options are rows so the
+// buttons survive a refresh and the question can be answered only once.
+model AgentQuestion {
+  id             String         @id @default(uuid())
+  conversationId String
+  conversation   Conversation   @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  threadId       String
+  key            String
+  status         QuestionStatus @default(PENDING)
+  answerLabel    String?
+  createdAt      DateTime       @default(now())
+  resolvedAt     DateTime?
+
+  options  AgentQuestionOption[]
+  messages Message[]
+
+  @@index([conversationId, status])
+}
+
+model AgentQuestionOption {
+  id          String        @id @default(uuid())
+  questionId  String
+  question    AgentQuestion @relation(fields: [questionId], references: [id], onDelete: Cascade)
+  label       String
+  value       String
+  description String?
+  recommended Boolean       @default(false)
+  position    Int
+
+  @@unique([questionId, position])
+}
+
+// LangGraph checkpoints. Stored as bytes so paused runs survive a restart without
+// a JSON column, which the official Postgres saver would need.
+model AgentCheckpoint {
+  threadId           String
+  checkpointNs       String   @default("")
+  checkpointId       String
+  parentCheckpointId String?
+  dataType           String
+  data               Bytes
+  metadataType       String
+  metadata           Bytes
+  createdAt          DateTime @default(now())
+
+  @@id([threadId, checkpointNs, checkpointId])
+}
+
+model AgentCheckpointWrite {
+  threadId     String
+  checkpointNs String @default("")
+  checkpointId String
+  taskId       String
+  idx          Int
+  taskPath     String @default("")
+  channel      String
+  valueType    String
+  value        Bytes
+
+  @@id([threadId, checkpointNs, checkpointId, taskId, idx])
 }

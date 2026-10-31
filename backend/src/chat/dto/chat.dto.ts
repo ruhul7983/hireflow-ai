@@ -63,6 +63,11 @@ export class DecideCandidateDto {
   decision: CandidateStatus;
 }
 
+export class AnswerQuestionDto {
+  @IsUUID()
+  optionId: string;
+}
+
 export class UploadCandidatesDto {
   @IsUUID()
   conversationId: string;

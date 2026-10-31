@@ -17,6 +17,7 @@ import {
   PendingActionType,
   RemotePolicy,
 } from '@prisma/client';
+import { OutreachService } from 'src/outreach/outreach.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { SourcingService } from 'src/sourcing/sourcing.service';
 import { CandidatesService } from './candidates.service';
@@ -42,6 +43,18 @@ export type ProposedCard = {
   jobId?: string;
 };
 
+export type CampaignProposal = {
+  name: string;
+  dayOffsets: number[];
+  dailyLimit: number;
+  instructions: string | null;
+  candidateIds: string[];
+};
+
+function candidateCount(count: number) {
+  return `${count} ${count === 1 ? 'candidate' : 'candidates'}`;
+}
+
 @Injectable()
 export class ActionsService {
   private readonly logger = new Logger(ActionsService.name);
@@ -51,6 +64,7 @@ export class ActionsService {
     private readonly chat: ChatService,
     private readonly sourcing: SourcingService,
     private readonly candidates: CandidatesService,
+    private readonly outreach: OutreachService,
   ) {}
 
   latestPending(conversationId: string) {
@@ -69,6 +83,11 @@ export class ActionsService {
         resolvedAt: new Date(),
       },
     });
+  }
+
+  // A new setup replaces any plan that hasn't been confirmed yet
+  cancelOpenCampaignPlans(conversationId: string) {
+    return this.supersede(conversationId, PendingActionType.CREATE_CAMPAIGN);
   }
 
   async proposeJob(
@@ -137,8 +156,37 @@ export class ActionsService {
 
     const verb = decision === CandidateStatus.ACCEPTED ? 'accept' : 'reject';
     return {
-      content: `Please confirm you want to ${verb} these ${candidateIds.length} candidates.`,
+      content: `Please confirm you want to ${verb} ${candidateCount(candidateIds.length)}.`,
       cardType: CardType.CANDIDATE_DECISION,
+      pendingActionId: action.id,
+      jobId,
+    };
+  }
+
+  async proposeCampaign(
+    conversationId: string,
+    jobId: string,
+    proposal: CampaignProposal,
+  ): Promise<ProposedCard> {
+    await this.supersede(conversationId, PendingActionType.CREATE_CAMPAIGN);
+
+    const { candidateIds, name, ...details } = proposal;
+    const action = await this.prisma.pendingAction.create({
+      data: {
+        conversationId,
+        type: PendingActionType.CREATE_CAMPAIGN,
+        jobId,
+        campaignName: name,
+        ...details,
+        candidates: {
+          create: candidateIds.map((candidateId) => ({ candidateId })),
+        },
+      },
+    });
+
+    return {
+      content: `Here is your plan for ${candidateCount(candidateIds.length)}. Confirm and I'll write the personal drafts. Nothing is sent yet.`,
+      cardType: CardType.CAMPAIGN_PROPOSAL,
       pendingActionId: action.id,
       jobId,
     };
@@ -197,6 +245,10 @@ export class ActionsService {
     const action = await this.findOwned(actionId, userId);
     await this.claim(actionId, PendingActionStatus.CANCELLED);
 
+    if (action.campaignId) {
+      await this.outreach.discard(action.campaignId);
+    }
+
     await this.chat.appendMessage(action.conversationId, {
       role: MessageRole.ASSISTANT,
       content: 'Okay, I cancelled that. Nothing was changed.',
@@ -214,6 +266,11 @@ export class ActionsService {
         return this.startSourcing(action, userId);
       case PendingActionType.DECIDE_CANDIDATES:
         return this.decideCandidates(action);
+      case PendingActionType.CREATE_CAMPAIGN:
+        return this.createCampaign(action, userId);
+      case PendingActionType.SEND_CAMPAIGN:
+        if (!action.campaignId) throw new Error('The campaign no longer exists');
+        return this.outreach.approve(action.campaignId);
     }
   }
 
@@ -284,6 +341,30 @@ export class ActionsService {
     await this.sourcing.startSearch(job, action.conversationId);
   }
 
+  private async createCampaign(
+    action: Awaited<ReturnType<ActionsService['findOwned']>>,
+    userId: string,
+  ) {
+    if (!action.jobId || !action.campaignName || !action.dailyLimit) {
+      throw new Error('The campaign details are incomplete');
+    }
+
+    const user = await this.prisma.user.findUniqueOrThrow({
+      where: { id: userId },
+    });
+
+    await this.outreach.createCampaign({
+      conversationId: action.conversationId,
+      jobId: action.jobId,
+      name: action.campaignName,
+      dayOffsets: action.dayOffsets,
+      dailyLimit: action.dailyLimit,
+      instructions: action.instructions,
+      senderName: user.name ?? user.email,
+      candidateIds: action.candidates.map(({ candidateId }) => candidateId),
+    });
+  }
+
   private async decideCandidates(
     action: Awaited<ReturnType<ActionsService['findOwned']>>,
   ) {
@@ -299,9 +380,14 @@ export class ActionsService {
     );
 
     const verb = action.decision === CandidateStatus.ACCEPTED ? 'Accepted' : 'Rejected';
+    const offer =
+      action.decision === CandidateStatus.ACCEPTED
+        ? ' Use Set up outreach on the candidate table when you are ready to contact them.'
+        : '';
+
     await this.chat.appendMessage(action.conversationId, {
       role: MessageRole.ASSISTANT,
-      content: `${verb} ${updated} ${updated === 1 ? 'candidate' : 'candidates'}. Every decision is saved under the job.`,
+      content: `${verb} ${candidateCount(updated)}. Every decision is saved under the job.${offer}`,
     });
   }
 }

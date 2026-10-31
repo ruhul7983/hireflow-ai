@@ -20,6 +20,7 @@ import { Job as QueueJob, Queue, Worker } from 'bullmq';
 import { ChatService } from 'src/chat/chat.service';
 import { EventsService } from 'src/chat/events.service';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { queueOptions } from 'src/queue/redis-options';
 import {
   ParsedCandidate,
   parseCandidateCsv,
@@ -61,18 +62,7 @@ export class SourcingService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit() {
-    const options = {
-      connection: {
-        host: this.configService.get<string>('REDIS_HOST'),
-        port: Number(this.configService.get('REDIS_PORT')),
-        password: this.configService.get<string>('REDIS_PASSWORD') || undefined,
-        db: Number(this.configService.get('REDIS_DB') ?? 0),
-        maxRetriesPerRequest: null,
-      },
-      prefix: (
-        this.configService.get<string>('REDIS_KEY_PREFIX') ?? 'hireflow'
-      ).replace(/:$/, ''),
-    };
+    const options = queueOptions(this.configService);
 
     this.searchQueue = new Queue(SEARCH_QUEUE, options);
     this.scoringQueue = new Queue(SCORING_QUEUE, options);

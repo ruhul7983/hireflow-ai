@@ -15,12 +15,19 @@ const MESSAGE_INCLUDE = {
   jobDraft: true,
   job: true,
   sourcingRun: true,
+  question: { include: { options: { orderBy: { position: 'asc' } } } },
   pendingAction: {
     include: {
       candidates: {
         include: {
           candidate: {
-            select: { id: true, name: true, headline: true, score: true },
+            select: {
+              id: true,
+              name: true,
+              headline: true,
+              email: true,
+              score: true,
+            },
           },
         },
       },

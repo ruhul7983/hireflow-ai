@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ExternalLink } from "lucide-react";
+import { secondaryButton } from "@/components/chat/action-buttons";
 import { CsvUploadButton } from "@/components/chat/csv-upload-button";
 import { api, errorMessage } from "@/lib/api";
 import type { Candidate } from "@/lib/chat-types";
@@ -14,6 +15,8 @@ const FILTERS = [
 ] as const;
 
 type Filter = (typeof FILTERS)[number]["key"];
+
+const REVIEWABLE = ["SOURCED", "ACCEPTED", "REJECTED"];
 
 function scoreTone(score: number) {
   if (score >= 70) return "bg-success-soft text-success-strong";
@@ -39,9 +42,10 @@ export function CandidateTableCard({
   onChanged,
 }: CandidateTableCardProps) {
   const [candidates, setCandidates] = useState<Candidate[] | null>(null);
-  const [filter, setFilter] = useState<Filter>("SOURCED");
+  const [chosenFilter, setChosenFilter] = useState<Filter | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [startingSetup, setStartingSetup] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -79,6 +83,20 @@ export function CandidateTableCard({
     setBusyId(null);
   }
 
+  async function startOutreach() {
+    setStartingSetup(true);
+    setError(null);
+    try {
+      await api(`/chat/conversations/${conversationId}/campaign-setup`, {
+        method: "POST",
+      });
+      onChanged();
+    } catch (cause) {
+      setError(errorMessage(cause));
+    }
+    setStartingSetup(false);
+  }
+
   if (!candidates) {
     return (
       <div className="rounded-xl border border-line p-4 text-sm text-muted">
@@ -87,6 +105,11 @@ export function CandidateTableCard({
     );
   }
 
+  // With nobody left to review, an empty tab would hide everyone from the recruiter
+  const hasUnreviewed = candidates.some((candidate) =>
+    matches(candidate, "SOURCED"),
+  );
+  const filter = chosenFilter ?? (hasUnreviewed ? "SOURCED" : "ALL");
   const visible = candidates.filter((candidate) => matches(candidate, filter));
 
   return (
@@ -98,7 +121,7 @@ export function CandidateTableCard({
               key={key}
               type="button"
               aria-pressed={filter === key}
-              onClick={() => setFilter(key)}
+              onClick={() => setChosenFilter(key)}
               className={`rounded-md px-2.5 py-1.5 text-sm font-medium focus-visible:outline-2 focus-visible:outline-brand ${
                 filter === key
                   ? "bg-brand-soft text-brand-strong"
@@ -112,11 +135,23 @@ export function CandidateTableCard({
             </button>
           ))}
         </div>
-        <CsvUploadButton
-          jobId={jobId}
-          conversationId={conversationId}
-          onChanged={onChanged}
-        />
+        <div className="flex flex-wrap items-center gap-2">
+          {candidates.some(({ status }) => status === "ACCEPTED") && (
+            <button
+              type="button"
+              onClick={startOutreach}
+              disabled={startingSetup}
+              className={secondaryButton}
+            >
+              {startingSetup ? "Starting…" : "Set up outreach"}
+            </button>
+          )}
+          <CsvUploadButton
+            jobId={jobId}
+            conversationId={conversationId}
+            onChanged={onChanged}
+          />
+        </div>
       </div>
 
       {error && (
@@ -180,26 +215,32 @@ export function CandidateTableCard({
                     {candidate.email ?? <span className="text-muted">Not known</span>}
                   </td>
                   <td className="py-3 pr-4">
-                    <div className="flex justify-end gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => decide(candidate.id, "ACCEPTED")}
-                        disabled={busyId === candidate.id || candidate.status === "ACCEPTED"}
-                        aria-label={`Accept ${candidate.name ?? "candidate"}`}
-                        className="rounded-md border border-line px-2 py-1 text-xs font-semibold text-success-strong hover:bg-success-soft focus-visible:outline-2 focus-visible:outline-brand disabled:border-transparent disabled:bg-success-soft"
-                      >
-                        {candidate.status === "ACCEPTED" ? "Accepted" : "Accept"}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => decide(candidate.id, "REJECTED")}
-                        disabled={busyId === candidate.id || candidate.status === "REJECTED"}
-                        aria-label={`Reject ${candidate.name ?? "candidate"}`}
-                        className="rounded-md border border-line px-2 py-1 text-xs font-semibold text-danger-strong hover:bg-danger-soft focus-visible:outline-2 focus-visible:outline-brand disabled:border-transparent disabled:bg-danger-soft"
-                      >
-                        {candidate.status === "REJECTED" ? "Rejected" : "Reject"}
-                      </button>
-                    </div>
+                    {!REVIEWABLE.includes(candidate.status) ? (
+                      <p className="text-right text-xs font-semibold text-brand-strong capitalize">
+                        {candidate.status.toLowerCase().replaceAll("_", " ")}
+                      </p>
+                    ) : (
+                      <div className="flex justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => decide(candidate.id, "ACCEPTED")}
+                          disabled={busyId === candidate.id || candidate.status === "ACCEPTED"}
+                          aria-label={`Accept ${candidate.name ?? "candidate"}`}
+                          className="rounded-md border border-line px-2 py-1 text-xs font-semibold text-success-strong hover:bg-success-soft focus-visible:outline-2 focus-visible:outline-brand disabled:border-transparent disabled:bg-success-soft"
+                        >
+                          {candidate.status === "ACCEPTED" ? "Accepted" : "Accept"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => decide(candidate.id, "REJECTED")}
+                          disabled={busyId === candidate.id || candidate.status === "REJECTED"}
+                          aria-label={`Reject ${candidate.name ?? "candidate"}`}
+                          className="rounded-md border border-line px-2 py-1 text-xs font-semibold text-danger-strong hover:bg-danger-soft focus-visible:outline-2 focus-visible:outline-brand disabled:border-transparent disabled:bg-danger-soft"
+                        >
+                          {candidate.status === "REJECTED" ? "Rejected" : "Reject"}
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))}

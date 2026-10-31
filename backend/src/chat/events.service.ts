@@ -1,23 +1,61 @@
 // src/chat/events.service.ts
-import { Injectable } from '@nestjs/common';
-import { filter, map, Observable, Subject } from 'rxjs';
+import {
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { SourcingRun } from '@prisma/client';
+import { Redis } from 'ioredis';
+import { filter, map, Observable, Subject } from 'rxjs';
+import { queueOptions } from 'src/queue/redis-options';
 
 export type ChatEvent =
   | { type: 'changed' } // Something new was saved, so the client reloads the conversation
   | { type: 'run'; run: SourcingRun }; // Live counters for a progress card
 
-// Workers run in this same process, so an in-memory bus reaches every open stream.
-// Running workers separately would need Redis pub/sub here instead.
+type Envelope = { conversationId: string; event: ChatEvent };
+
+// Goes through Redis because the worker that does the job may not be the process
+// holding the browser's stream.
 @Injectable()
-export class EventsService {
-  private readonly events$ = new Subject<{
-    conversationId: string;
-    event: ChatEvent;
-  }>();
+export class EventsService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(EventsService.name);
+  private readonly events$ = new Subject<Envelope>();
+  private readonly channel: string;
+  private readonly publisher: Redis;
+  private readonly subscriber: Redis;
+
+  constructor(configService: ConfigService) {
+    const { connection, prefix } = queueOptions(configService);
+
+    this.channel = `${prefix}:chat-events`;
+    this.publisher = new Redis(connection);
+    this.subscriber = new Redis(connection);
+  }
+
+  async onModuleInit() {
+    for (const client of [this.publisher, this.subscriber]) {
+      // Without a listener, a lost Redis connection would crash the process
+      client.on('error', (error: Error) => this.logger.error(error.message));
+    }
+
+    this.subscriber.on('message', (_channel: string, message: string) => {
+      this.events$.next(JSON.parse(message) as Envelope);
+    });
+    await this.subscriber.subscribe(this.channel);
+  }
+
+  async onModuleDestroy() {
+    await Promise.all([this.publisher.quit(), this.subscriber.quit()]);
+  }
 
   publish(conversationId: string, event: ChatEvent) {
-    this.events$.next({ conversationId, event });
+    // Live updates are a convenience, so a failure here must not fail the job
+    this.publisher
+      .publish(this.channel, JSON.stringify({ conversationId, event }))
+      .catch((error: Error) => this.logger.error(error.message));
   }
 
   stream(conversationId: string): Observable<ChatEvent> {

@@ -45,11 +45,16 @@ export type PendingAction = {
   status: "PENDING" | "EXECUTED" | "CANCELLED" | "FAILED";
   decision: "ACCEPTED" | "REJECTED" | null;
   jobId: string | null;
+  campaignName: string | null;
+  dayOffsets: number[];
+  dailyLimit: number | null;
+  instructions: string | null;
   candidates: {
     candidate: {
       id: string;
       name: string | null;
       headline: string | null;
+      email: string | null;
       score: number | null;
     };
   }[];
@@ -61,7 +66,23 @@ export type CardType =
   | "SOURCING_PROMPT"
   | "SOURCING_PROGRESS"
   | "CANDIDATE_TABLE"
-  | "CANDIDATE_DECISION";
+  | "CANDIDATE_DECISION"
+  | "CAMPAIGN_PROPOSAL"
+  | "CAMPAIGN_DRAFTS"
+  | "CAMPAIGN_PROGRESS"
+  | "QUESTION";
+
+export type AgentQuestion = {
+  id: string;
+  status: "PENDING" | "ANSWERED" | "CANCELLED";
+  answerLabel: string | null;
+  options: {
+    id: string;
+    label: string;
+    description: string | null;
+    recommended: boolean;
+  }[];
+};
 
 export type ChatMessage = {
   id: string;
@@ -69,10 +90,12 @@ export type ChatMessage = {
   content: string;
   cardType: CardType | null;
   jobId: string | null;
+  campaignId: string | null;
   jobDraft: JobDraft | null;
   job: Job | null;
   sourcingRun: SourcingRun | null;
   pendingAction: PendingAction | null;
+  question: AgentQuestion | null;
 };
 
 export type Conversation = ConversationSummary & { messages: ChatMessage[] };
@@ -90,6 +113,39 @@ export type Candidate = {
   scoreReason: string | null;
   // Later pipeline stages arrive with outreach, so review treats them as decided
   status: CandidateStatus | string;
+};
+
+export type OutboundEmail = {
+  id: string;
+  campaignStepId: string;
+  candidateId: string;
+  subject: string;
+  body: string;
+  status: "DRAFT" | "APPROVED" | "SENDING" | "SENT" | "FAILED";
+  dueAt: string | null;
+  sentAt: string | null;
+  previewUrl: string | null;
+  error: string | null;
+};
+
+export type Campaign = {
+  id: string;
+  name: string;
+  status:
+    | "DRAFTING"
+    | "DRAFT"
+    | "SENDING"
+    | "PAUSED"
+    | "COMPLETED"
+    | "CANCELLED"
+    | "FAILED";
+  dailyLimit: number;
+  steps: { id: string; position: number; dayOffset: number }[];
+  recipients: {
+    stoppedAt: string | null;
+    candidate: { id: string; name: string | null; email: string | null };
+  }[];
+  emails: OutboundEmail[];
 };
 
 export type ChatEvent =

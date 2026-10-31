@@ -40,10 +40,12 @@ function optimisticMessage(content: string): ChatMessage {
     content,
     cardType: null,
     jobId: null,
+    campaignId: null,
     jobDraft: null,
     job: null,
     sourcingRun: null,
     pendingAction: null,
+    question: null,
   };
 }
 
@@ -60,6 +62,9 @@ export function ChatWorkspace() {
   const pinnedToBottom = useRef(true);
 
   const activeId = conversation?.id ?? null;
+  const waitingQuestionId = conversation?.messages.find(
+    ({ question }) => question?.status === "PENDING",
+  )?.id;
 
   const reloadList = useCallback(async () => {
     setConversations(await api<ConversationSummary[]>("/chat/conversations"));
@@ -145,6 +150,15 @@ export function ChatWorkspace() {
     return () => observer.disconnect();
   }, []);
 
+  // A question is waiting on the recruiter, so it must never appear off-screen
+  useEffect(() => {
+    const scroller = scrollerRef.current;
+    if (!waitingQuestionId || !scroller) return;
+
+    pinnedToBottom.current = true;
+    scroller.scrollTop = scroller.scrollHeight;
+  }, [waitingQuestionId]);
+
   function handleScroll() {
     const scroller = scrollerRef.current;
     if (!scroller) return;
@@ -154,9 +168,8 @@ export function ChatWorkspace() {
     pinnedToBottom.current = distance < PINNED_DISTANCE;
   }
 
-  async function send(event?: FormEvent) {
-    event?.preventDefault();
-    const content = draft.trim();
+  async function send(text: string) {
+    const content = text.trim();
     if (!content || !conversation || sending) return;
 
     pinnedToBottom.current = true;
@@ -187,8 +200,13 @@ export function ChatWorkspace() {
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      void send();
+      void send(draft);
     }
+  }
+
+  function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    void send(draft);
   }
 
   function handleNew() {
@@ -292,7 +310,7 @@ export function ChatWorkspace() {
           </ol>
         </div>
 
-        <form onSubmit={send} className="border-t border-line p-3 sm:p-4">
+        <form onSubmit={handleSubmit} className="border-t border-line p-3 sm:p-4">
           <div className="mx-auto w-full max-w-5xl space-y-2">
             {error && (
               <p role="alert" className="text-sm font-medium text-danger-strong">

@@ -22,6 +22,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ActivityActor, PendingActionStatus } from '@prisma/client';
 import { interval, map, merge, Observable } from 'rxjs';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
+import { CampaignSetupService } from 'src/campaign-setup/campaign-setup.service';
 import { DatabaseAuthGuard } from 'src/auth/guards/database-auth.guard';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { SourcingService } from 'src/sourcing/sourcing.service';
@@ -30,6 +31,7 @@ import { AgentService } from './agent.service';
 import { CandidatesService } from './candidates.service';
 import { ChatService } from './chat.service';
 import {
+  AnswerQuestionDto,
   DecideCandidateDto,
   SendMessageDto,
   UpdateJobDraftDto,
@@ -51,6 +53,7 @@ export class ChatController {
     private readonly candidates: CandidatesService,
     private readonly sourcing: SourcingService,
     private readonly events: EventsService,
+    private readonly campaignSetup: CampaignSetupService,
   ) {}
 
   @Get('chat/conversations')
@@ -113,6 +116,38 @@ export class ChatController {
     @GetUser('id') userId: string,
   ) {
     await this.actions.cancel(id, userId);
+    return { success: true };
+  }
+
+  // The button goes straight to the setup, with no model deciding what happens
+  @Post('chat/conversations/:id/campaign-setup')
+  @HttpCode(HttpStatus.OK)
+  async startCampaignSetup(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') userId: string,
+  ) {
+    await this.campaignSetup.start(id, userId);
+    return { success: true };
+  }
+
+  @Post('chat/questions/:id/answer')
+  @HttpCode(HttpStatus.OK)
+  async answerQuestion(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: AnswerQuestionDto,
+    @GetUser('id') userId: string,
+  ) {
+    await this.campaignSetup.answerWithOption(id, dto.optionId, userId);
+    return { success: true };
+  }
+
+  @Post('chat/questions/:id/cancel')
+  @HttpCode(HttpStatus.OK)
+  async cancelQuestion(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') userId: string,
+  ) {
+    await this.campaignSetup.cancel(id, userId);
     return { success: true };
   }
 

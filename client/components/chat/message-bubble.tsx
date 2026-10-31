@@ -1,9 +1,13 @@
 import { Bot } from "lucide-react";
+import { CampaignDraftsCard } from "@/components/chat/campaign-drafts-card";
+import { CampaignProgressCard } from "@/components/chat/campaign-progress-card";
+import { CampaignProposalCard } from "@/components/chat/campaign-proposal-card";
 import { CandidateTableCard } from "@/components/chat/candidate-table-card";
 import { DecisionCard } from "@/components/chat/decision-card";
 import { JobCreatedCard } from "@/components/chat/job-created-card";
 import { JobDraftCard } from "@/components/chat/job-draft-card";
 import { ProgressCard } from "@/components/chat/progress-card";
+import { QuestionCard } from "@/components/chat/question-card";
 import { SourcingPromptCard } from "@/components/chat/sourcing-prompt-card";
 import type { ChatMessage } from "@/lib/chat-types";
 
@@ -15,7 +19,16 @@ type MessageBubbleProps = {
 };
 
 function Card({ message, conversationId, refreshKey, onChanged }: MessageBubbleProps) {
-  const { cardType, jobDraft, job, sourcingRun, pendingAction, jobId } = message;
+  const {
+    cardType,
+    jobDraft,
+    job,
+    sourcingRun,
+    pendingAction,
+    jobId,
+    campaignId,
+    question,
+  } = message;
 
   if (cardType === "JOB_DRAFT" && jobDraft && pendingAction) {
     return (
@@ -54,6 +67,31 @@ function Card({ message, conversationId, refreshKey, onChanged }: MessageBubbleP
   }
   if (cardType === "CANDIDATE_DECISION" && pendingAction) {
     return <DecisionCard action={pendingAction} onChanged={onChanged} />;
+  }
+  if (cardType === "CAMPAIGN_PROPOSAL" && pendingAction) {
+    return <CampaignProposalCard action={pendingAction} onChanged={onChanged} />;
+  }
+  if (cardType === "CAMPAIGN_DRAFTS" && campaignId) {
+    return (
+      <CampaignDraftsCard
+        campaignId={campaignId}
+        action={pendingAction}
+        refreshKey={refreshKey}
+        onChanged={onChanged}
+      />
+    );
+  }
+  if (cardType === "CAMPAIGN_PROGRESS" && campaignId) {
+    return (
+      <CampaignProgressCard
+        campaignId={campaignId}
+        refreshKey={refreshKey}
+        onChanged={onChanged}
+      />
+    );
+  }
+  if (cardType === "QUESTION" && question) {
+    return <QuestionCard question={question} onChanged={onChanged} />;
   }
   return null;
 }
