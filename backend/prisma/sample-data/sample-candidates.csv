@@ -1,0 +1,7 @@
+name,email,profile_url,headline,location,summary
+Ayesha Karim,ayesha.karim@example.test,https://www.linkedin.com/in/sample-ayesha-karim,Senior Frontend Engineer,"Dhaka, Bangladesh","7 years building React and TypeScript apps. Led a Next.js migration for a fintech product."
+Tanvir Ahmed,tanvir.ahmed@example.test,,React Developer,"Dhaka, Bangladesh","3 years with React and JavaScript. Some TypeScript. No Next.js experience listed."
+Lamia Sultana,lamia.sultana@example.test,https://www.linkedin.com/in/sample-lamia-sultana,Full Stack Engineer,"Chattogram, Bangladesh","6 years with Next.js, React, TypeScript and GraphQL. Open to hybrid work."
+Rafiq Islam,rafiq.islam@example.test,https://www.linkedin.com/in/sample-rafiq-islam,Backend Engineer,"Dhaka, Bangladesh","8 years with Java and Spring Boot. No frontend experience listed."
+Duplicate Row,ayesha.karim@example.test,,Senior Frontend Engineer,"Dhaka, Bangladesh",Same email as the first row so the import shows duplicate removal.
+Missing Contact,,,Designer,Dhaka,This row has no email or profile URL so the import skips it.

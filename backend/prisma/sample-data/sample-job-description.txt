@@ -1,0 +1,14 @@
+Senior React Engineer
+
+We are hiring a Senior React Engineer to join our product team in Dhaka, Bangladesh. This is a hybrid role with three days a week in the office.
+
+Salary: BDT 150,000 to 220,000 per month.
+
+Must have:
+- 5 or more years of experience with React
+- Strong TypeScript
+- Production experience with Next.js
+
+Nice to have:
+- GraphQL
+- Tailwind CSS

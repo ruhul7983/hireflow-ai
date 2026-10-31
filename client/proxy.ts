@@ -51,6 +51,8 @@ export async function proxy(request: NextRequest) {
   return response;
 }
 
+// API calls stay out of this: Next drops Set-Cookie on rewrites to another
+// server, so lib/api.ts renews the session for those itself.
 export const config = {
   matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\.svg$).*)"],
 };

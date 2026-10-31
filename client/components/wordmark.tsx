@@ -1,9 +1,14 @@
-export function Wordmark({ className = "" }: { className?: string }) {
+export function Wordmark() {
   return (
-    <span className={`font-display text-xl font-semibold ${className}`}>
-      HireFlow
-      <span className="ml-1.5 align-middle font-sans text-[0.625rem] font-semibold uppercase tracking-[0.2em]">
-        AI
+    <span className="flex items-center gap-2.5">
+      <span
+        aria-hidden
+        className="grid size-8 place-items-center rounded-lg bg-brand text-sm font-bold text-white"
+      >
+        H
+      </span>
+      <span className="text-lg font-semibold tracking-tight">
+        HireFlow <span className="text-brand">AI</span>
       </span>
     </span>
   );

@@ -1,26 +1,42 @@
 @import "tailwindcss";
 
 @theme inline {
-  --color-forest: #064e3a;
-  --color-cream: #f8e7c9;
-  --font-sans: var(--font-geist-sans);
-  --font-display: var(--font-fraunces);
-}
+  --color-canvas: #f3f4f6;
+  --color-surface: #ffffff;
+  --color-ink: #111827;
+  --color-muted: #4b5563;
+  --color-line: #e5e7eb;
 
-:root {
-  --background: #f8e7c9;
-  --foreground: #064e3a;
+  --color-brand: #2563eb;
+  --color-brand-strong: #1d4ed8;
+  --color-brand-soft: #eff6ff;
+
+  --color-success: #16a34a;
+  --color-success-strong: #15803d;
+  --color-success-soft: #f0fdf4;
+
+  --color-warning: #f59e0b;
+  --color-warning-strong: #b45309;
+  --color-warning-soft: #fffbeb;
+
+  --color-danger: #dc2626;
+  --color-danger-strong: #b91c1c;
+  --color-danger-soft: #fef2f2;
+
+  --color-info: #0891b2;
+
+  --font-sans: var(--font-geist-sans);
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--color-surface);
+  color: var(--color-ink);
   font-family: var(--font-geist-sans), Arial, Helvetica, sans-serif;
 }
 
 /* Stops browser autofill from painting its own colours over the fields */
 input:-webkit-autofill {
-  -webkit-text-fill-color: var(--foreground);
-  box-shadow: 0 0 0 100px var(--background) inset;
-  caret-color: var(--foreground);
+  -webkit-text-fill-color: var(--color-ink);
+  box-shadow: 0 0 0 100px var(--color-surface) inset;
+  caret-color: var(--color-ink);
 }

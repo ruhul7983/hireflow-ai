@@ -27,6 +27,9 @@ model User {
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
   userTokens UserToken[]
+
+  conversations Conversation[]
+  jobs          Job[]
 }
 
 
@@ -42,4 +45,401 @@ model UserToken {
   updatedAt    DateTime @updatedAt
 
   @@index([userId])
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+}
+
+// Cards are stored as a type plus foreign keys, never as JSON. The UI rebuilds
+// each card from the live rows, so a card always shows the current data.
+enum CardType {
+  JOB_DRAFT
+  JOB_CREATED
+  SOURCING_PROMPT
+  SOURCING_PROGRESS
+  CANDIDATE_TABLE
+  CANDIDATE_DECISION
+}
+
+enum RemotePolicy {
+  ONSITE
+  HYBRID
+  REMOTE
+}
+
+enum JobStatus {
+  OPEN
+  CLOSED
+}
+
+enum PendingActionType {
+  CREATE_JOB
+  START_SOURCING
+  DECIDE_CANDIDATES
+}
+
+enum PendingActionStatus {
+  PENDING
+  EXECUTED
+  CANCELLED
+  FAILED
+}
+
+enum CandidateSource {
+  SERPER
+  CSV
+}
+
+enum CandidateStatus {
+  SOURCED
+  ACCEPTED
+  REJECTED
+  CONTACTED
+  REPLIED
+  INTERESTED
+  NOT_INTERESTED
+  MEETING_BOOKED
+  INTERVIEWED
+  SHORTLISTED
+  HIRED
+  UNSUBSCRIBED
+}
+
+enum RunStatus {
+  QUEUED
+  SOURCING
+  SCORING
+  COMPLETED
+  FAILED
+}
+
+enum ActivityActor {
+  RECRUITER
+  AI
+  SYSTEM
+}
+
+enum ActivityType {
+  JOB_CREATED
+  SOURCING_STARTED
+  SOURCING_FINISHED
+  CANDIDATE_STATUS_CHANGED
+}
+
+enum CampaignStatus {
+  DRAFT
+  APPROVED
+  SENDING
+  PAUSED
+  COMPLETED
+}
+
+enum EmailStatus {
+  DRAFT
+  APPROVED
+  SENT
+  FAILED
+}
+
+enum ReplyClassification {
+  INTERESTED
+  NOT_INTERESTED
+  QUESTION
+  WANTS_MEETING
+  UNSUBSCRIBE
+}
+
+enum ReplyDraftStatus {
+  PENDING_APPROVAL
+  APPROVED
+  SENT
+  DISCARDED
+}
+
+enum MeetingStatus {
+  LINK_SENT
+  BOOKED
+  COMPLETED
+  CANCELLED
+}
+
+model Conversation {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId     String?
+  job       Job?     @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  title     String   @default("New chat")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages       Message[]
+  pendingActions PendingAction[]
+  jobDrafts      JobDraft[]
+
+  @@index([userId, updatedAt])
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  role           MessageRole
+  content        String       @db.Text
+  cardType       CardType?
+  createdAt      DateTime     @default(now())
+
+  jobDraftId      String?
+  jobDraft        JobDraft?      @relation(fields: [jobDraftId], references: [id], onDelete: SetNull)
+  jobId           String?
+  job             Job?           @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  sourcingRunId   String?
+  sourcingRun     SourcingRun?   @relation(fields: [sourcingRunId], references: [id], onDelete: SetNull)
+  pendingActionId String?
+  pendingAction   PendingAction? @relation(fields: [pendingActionId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
+}
+
+// What the AI extracted, kept apart from Job so that no job exists until the
+// recruiter confirms it.
+model JobDraft {
+  id               String        @id @default(uuid())
+  conversationId   String
+  conversation     Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  title            String?
+  seniority        String?
+  location         String?
+  salary           String?
+  remotePolicy     RemotePolicy?
+  mustHaveSkills   String[]
+  niceToHaveSkills String[]
+  description      String        @db.Text
+  sourceUrl        String?
+  jobId            String?       @unique
+  job              Job?          @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  messages       Message[]
+  pendingActions PendingAction[]
+}
+
+model Job {
+  id               String        @id @default(uuid())
+  userId           String
+  user             User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title            String
+  seniority        String?
+  location         String?
+  salary           String?
+  remotePolicy     RemotePolicy?
+  mustHaveSkills   String[]
+  niceToHaveSkills String[]
+  description      String        @db.Text
+  sourceUrl        String?
+  status           JobStatus     @default(OPEN)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  draft          JobDraft?
+  conversations  Conversation[]
+  messages       Message[]
+  pendingActions PendingAction[]
+  sourcingRuns   SourcingRun[]
+  candidates     Candidate[]
+  activityLogs   ActivityLog[]
+  campaigns      Campaign[]
+
+  @@index([userId, createdAt])
+}
+
+// Write tools create one of these instead of acting. Only the confirm path runs
+// it, so the "confirm before any write" rule is enforced here and not in a prompt.
+model PendingAction {
+  id             String              @id @default(uuid())
+  conversationId String
+  conversation   Conversation        @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  type           PendingActionType
+  status         PendingActionStatus @default(PENDING)
+  jobDraftId     String?
+  jobDraft       JobDraft?           @relation(fields: [jobDraftId], references: [id], onDelete: SetNull)
+  jobId          String?
+  job            Job?                @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  decision       CandidateStatus?
+  createdAt      DateTime            @default(now())
+  resolvedAt     DateTime?
+
+  candidates PendingActionCandidate[]
+  messages   Message[]
+
+  @@index([conversationId, status])
+}
+
+model PendingActionCandidate {
+  pendingActionId String
+  pendingAction   PendingAction @relation(fields: [pendingActionId], references: [id], onDelete: Cascade)
+  candidateId     String
+  candidate       Candidate     @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@id([pendingActionId, candidateId])
+}
+
+model SourcingRun {
+  id             String          @id @default(uuid())
+  jobId          String
+  job            Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  conversationId String
+  source         CandidateSource
+  status         RunStatus       @default(QUEUED)
+  searchQuery    String?
+  fileName       String?
+  foundCount     Int             @default(0)
+  duplicateCount Int             @default(0)
+  skippedCount   Int             @default(0)
+  scoredCount    Int             @default(0)
+  error          String?
+  createdAt      DateTime        @default(now())
+  finishedAt     DateTime?
+
+  candidates Candidate[]
+  messages   Message[]
+
+  @@index([jobId])
+}
+
+// Postgres allows many NULLs in a unique index, so candidates missing an email
+// or a profile URL still dedupe correctly on the one they have.
+model Candidate {
+  id            String          @id @default(uuid())
+  jobId         String
+  job           Job             @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  sourcingRunId String?
+  sourcingRun   SourcingRun?    @relation(fields: [sourcingRunId], references: [id], onDelete: SetNull)
+  source        CandidateSource
+  name          String?
+  email         String?
+  profileUrl    String?
+  headline      String?
+  location      String?
+  snippet       String?         @db.Text
+  score         Int?
+  scoreReason   String?         @db.Text
+  status        CandidateStatus @default(SOURCED)
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  pendingActions PendingActionCandidate[]
+  activityLogs   ActivityLog[]
+  recipients     CampaignRecipient[]
+  emails         OutboundEmail[]
+  replies        CandidateReply[]
+  meetings       Meeting[]
+
+  @@unique([jobId, email])
+  @@unique([jobId, profileUrl])
+  @@index([jobId, status])
+  @@index([jobId, score])
+}
+
+model ActivityLog {
+  id          String           @id @default(uuid())
+  jobId       String
+  job         Job              @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  candidateId String?
+  candidate   Candidate?       @relation(fields: [candidateId], references: [id], onDelete: SetNull)
+  actor       ActivityActor
+  type        ActivityType
+  fromStatus  CandidateStatus?
+  toStatus    CandidateStatus?
+  summary     String
+  createdAt   DateTime         @default(now())
+
+  @@index([jobId, createdAt])
+}
+
+model Campaign {
+  id         String         @id @default(uuid())
+  jobId      String
+  job        Job            @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  name       String
+  status     CampaignStatus @default(DRAFT)
+  dailyLimit Int            @default(50)
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  steps      CampaignStep[]
+  recipients CampaignRecipient[]
+
+  @@index([jobId])
+}
+
+model CampaignStep {
+  id         String   @id @default(uuid())
+  campaignId String
+  campaign   Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  position   Int
+  dayOffset  Int
+  subject    String
+  body       String   @db.Text
+
+  emails OutboundEmail[]
+
+  @@unique([campaignId, position])
+}
+
+model CampaignRecipient {
+  id          String    @id @default(uuid())
+  campaignId  String
+  campaign    Campaign  @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  candidateId String
+  candidate   Candidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  stoppedAt   DateTime?
+
+  @@unique([campaignId, candidateId])
+}
+
+model OutboundEmail {
+  id             String       @id @default(uuid())
+  campaignStepId String
+  campaignStep   CampaignStep @relation(fields: [campaignStepId], references: [id], onDelete: Cascade)
+  candidateId    String
+  candidate      Candidate    @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  subject        String
+  body           String       @db.Text
+  status         EmailStatus  @default(DRAFT)
+  sentAt         DateTime?
+  createdAt      DateTime     @default(now())
+
+  // Guarantees no candidate can ever receive the same step twice
+  @@unique([campaignStepId, candidateId])
+  @@index([status, sentAt])
+}
+
+model CandidateReply {
+  id             String               @id @default(uuid())
+  candidateId    String
+  candidate      Candidate            @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  body           String               @db.Text
+  classification ReplyClassification?
+  draftBody      String?              @db.Text
+  draftStatus    ReplyDraftStatus?
+  receivedAt     DateTime             @default(now())
+
+  @@index([candidateId, receivedAt])
+}
+
+model Meeting {
+  id          String        @id @default(uuid())
+  candidateId String
+  candidate   Candidate     @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  bookingUrl  String?
+  startsAt    DateTime?
+  status      MeetingStatus @default(LINK_SENT)
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([candidateId])
 }
