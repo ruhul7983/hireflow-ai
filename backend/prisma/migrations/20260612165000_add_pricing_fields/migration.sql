@@ -1,0 +1,3 @@
+-- AlterTable
+ALTER TABLE "Service" ADD COLUMN IF NOT EXISTS "pricingIntro" TEXT;
+ALTER TABLE "Service" ADD COLUMN IF NOT EXISTS "pricingPlans" JSONB NOT NULL DEFAULT '[]';
