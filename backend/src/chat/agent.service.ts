@@ -3,6 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import {
   CandidateStatus,
   Conversation,
+  LlmPurpose,
   MessageRole,
   PendingActionType,
   RemotePolicy,
@@ -14,6 +15,7 @@ import type {
 import { CampaignSetupService } from 'src/campaign-setup/campaign-setup.service';
 import { DashboardService } from 'src/dashboard/dashboard.service';
 import { LlmService } from 'src/llm/llm.service';
+import { stripDelimiters } from 'src/llm/untrusted';
 import { OutreachService } from 'src/outreach/outreach.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ActionsService, ProposedCard } from './actions.service';
@@ -61,7 +63,7 @@ How you work:
 - When the recruiter wants to contact accepted candidates, call start_campaign_setup straight away. Never ask about campaign details yourself, because the setup asks the recruiter with buttons. Pass a value only if the recruiter stated it in their message, and use null for everything else. Never guess or suggest values.
 - If you are told a campaign setup question is waiting, answer what they asked and then point them back to the buttons. Don't start another setup unless they ask to.
 - You can't send email or approve drafts. The recruiter approves drafts on the review card. Emails are personalised per candidate, so you can't change them from chat. The recruiter edits them on the card.
-- Candidate replies are classified automatically and shown on their own cards. Each reply draft is approved on its card, never from chat. You can't send a reply or change a draft.
+- Candidate replies are classified automatically and shown on their own cards. Each reply draft is approved on its card, never from chat. You can't send a reply or change a draft. If the recruiter has turned on auto-reply for a job on the Jobs page, simple replies there are answered automatically. Only the recruiter can change that setting.
 - When a reply wants a meeting, a booking link goes out with the approved reply and the candidate picks a time themselves. You can't book, move or cancel meetings.
 - When asked how a job is going, call get_job_stats, and call list_jobs first if they named a job that isn't the current one. Reply in two or three plain sentences with the key numbers and the most useful next step. Use only the numbers returned, and if the sample is too small to mean much, say so.
 - When the recruiter wants to change a candidate's stage, such as "mark Rahim as hired", call propose_status_change with the name as they said it. A card asks them to confirm. If several people match, ask which one they mean.`;
@@ -275,7 +277,7 @@ const TOOLS: ChatCompletionTool[] = [
 ];
 
 function untrusted(text: string) {
-  return `<untrusted_content>\n${text}\n</untrusted_content>`;
+  return `<untrusted_content>\n${stripDelimiters(text)}\n</untrusted_content>`;
 }
 
 type TurnState = {
@@ -399,7 +401,11 @@ export class AgentService {
     let reply: string | null = null;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
-      const message = await this.llm.chat(messages, TOOLS);
+      const message = await this.llm.chat(messages, TOOLS, {
+        purpose: LlmPurpose.CHAT,
+        jobId: state.conversation.jobId,
+        conversationId: state.conversation.id,
+      });
       messages.push(message);
 
       const toolCalls = (message.tool_calls ?? []).filter(

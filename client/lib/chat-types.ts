@@ -128,6 +128,7 @@ export type CandidateReply = {
     | "FAILED"
     | "DISCARDED"
     | null;
+  autoSent: boolean;
   previewUrl: string | null;
   error: string | null;
   candidate: { id: string; name: string | null; email: string | null };

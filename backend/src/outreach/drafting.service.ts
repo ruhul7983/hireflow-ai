@@ -1,7 +1,8 @@
 // src/outreach/drafting.service.ts
 import { Injectable } from '@nestjs/common';
-import { Candidate, CampaignStep, Job } from '@prisma/client';
+import { Candidate, CampaignStep, Job, LlmPurpose } from '@prisma/client';
 import { LlmService } from 'src/llm/llm.service';
+import { stripDelimiters } from 'src/llm/untrusted';
 
 const SYSTEM_PROMPT = `You write short, personal recruiting emails to a candidate, one email for each step of a sequence.
 
@@ -79,7 +80,7 @@ function describeRequest({
 
   return [
     `Job:\n${jobFacts.join('\n')}`,
-    `<candidate>\n${candidateFacts.join('\n') || 'No details'}\n</candidate>`,
+    `<candidate>\n${stripDelimiters(candidateFacts.join('\n')) || 'No details'}\n</candidate>`,
     `Sender: ${senderName}`,
     instructions && `Recruiter instructions: ${instructions}`,
     `Write exactly ${steps.length} emails, in this order:\n${sequence}`,
@@ -98,6 +99,7 @@ export class DraftingService {
       describeRequest(request),
       'campaign_emails',
       RESULT_SCHEMA,
+      { purpose: LlmPurpose.DRAFTING, jobId: request.job.id },
     );
 
     // Thrown errors retry the job, so a bad draft never reaches the recruiter

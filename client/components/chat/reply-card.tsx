@@ -119,7 +119,9 @@ function ReplyDraft({ reply, action, onChanged }: ReplyDraftProps) {
         />
       ) : (
         <p className="flex flex-wrap items-center gap-3 text-sm text-muted">
-          {reply.draftStatus && DRAFT_NOTES[reply.draftStatus]}
+          {reply.autoSent && reply.draftStatus === "SENT"
+            ? "Sent automatically, because auto-reply is on for this job."
+            : reply.draftStatus && DRAFT_NOTES[reply.draftStatus]}
           {reply.previewUrl && (
             <a
               href={reply.previewUrl}

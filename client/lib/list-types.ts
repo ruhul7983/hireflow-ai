@@ -5,8 +5,10 @@ export type JobOption = { id: string; title: string };
 
 export type JobRow = DashboardJob & {
   seniority: string | null;
+  autoReply: boolean;
   createdAt: string;
   campaigns: number;
+  usage: { tokens: number; costUsd: number };
 };
 
 export type CandidateRow = {

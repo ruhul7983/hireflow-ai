@@ -1,36 +1,33 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# HireFlow AI: client
 
-## Getting Started
+The web app for HireFlow AI, a chat-first AI recruiting co-worker. It is built with Next.js 16, React 19, TypeScript and Tailwind CSS.
 
-First, run the development server:
+The architecture, agent design, trade-offs and what is mocked are in the [backend README](../backend/README.md).
+
+## Run it
+
+Start the [backend](../backend/README.md) first, or use `docker compose up --build` from the repository root to run everything.
 
 ```bash
+cp .env.example .env
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open <http://localhost:3000> and sign in with the admin account from the backend's `.env`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+`BACKEND_URL` is read at build time for the `/api` rewrite, so rebuild after changing it.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## How it's put together
 
-## Learn More
+| Route | What it does |
+| --- | --- |
+| `/chat` | The main workspace, with interactive cards and live progress over SSE |
+| `/` | Dashboard with the funnel, reply rate, interested rate, meetings and hires per job |
+| `/jobs`, `/candidates`, `/campaigns`, `/activity` | Lists with server-side pagination, search and filters |
+| `/book/[token]` | Public booking page for candidates |
+| `/login` | Sign in |
 
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- **Lists keep their state in the URL.** The server renders each page of rows, so refresh, links and the back button all land on the same view. The shared pieces are in `components/list/`.
+- **Requests go through `/api`.** It rewrites to the backend, which keeps session cookies first-party. `lib/api.ts` renews an expired session once and retries.
+- **Loading states are skeletons** that match the real layout, so the page doesn't jump.

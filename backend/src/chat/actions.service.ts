@@ -349,6 +349,11 @@ export class ActionsService {
         where: { id: action.conversationId },
         data: { jobId: created.id, title: created.title },
       });
+      // The chat that shaped this job is part of what it cost
+      await tx.llmUsage.updateMany({
+        where: { conversationId: action.conversationId, jobId: null },
+        data: { jobId: created.id },
+      });
       await tx.activityLog.create({
         data: {
           jobId: created.id,

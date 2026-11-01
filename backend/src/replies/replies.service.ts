@@ -12,9 +12,11 @@ import { ConfigService } from '@nestjs/config';
 import {
   ActivityActor,
   ActivityType,
+  Candidate,
   CandidateStatus,
   CardType,
   EmailStatus,
+  Job,
   MessageRole,
   PendingActionStatus,
   PendingActionType,
@@ -30,9 +32,13 @@ import { MailerService } from 'src/outreach/mailer.service';
 import { OutreachService } from 'src/outreach/outreach.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { queueOptions } from 'src/queue/redis-options';
+import { isSafeToAutoSend } from './auto-reply';
 import { ReplyReaderService } from './reply-reader.service';
+import type { ReplyReading } from './reply-reader.service';
 
 const QUEUE_NAME = 'replies';
+const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_AUTO_REPLIES_PER_DAY = 20;
 
 const JOB_OPTIONS = {
   attempts: 3,
@@ -56,6 +62,9 @@ const LATER_STAGES: CandidateStatus[] = [
   CandidateStatus.SHORTLISTED,
   CandidateStatus.HIRED,
 ];
+
+const AUTO_SENT_MESSAGE =
+  'Auto-reply is on for this job and this was a simple case, so I answered them.';
 
 const CARD_MESSAGES: Record<ReplyClassification, string> = {
   INTERESTED: 'They sound interested. I drafted a reply for you to check.',
@@ -179,6 +188,38 @@ export class RepliesService implements OnModuleInit, OnModuleDestroy {
     return reply;
   }
 
+  // The content rules, then limits that need the database. Any "no" means a person decides.
+  private async canAutoSend(
+    job: Job,
+    candidate: Candidate,
+    replyBody: string,
+    reading: ReplyReading,
+  ) {
+    if (
+      !job.autoReply ||
+      LATER_STAGES.includes(candidate.status) ||
+      !isSafeToAutoSend(replyBody, reading)
+    ) {
+      return false;
+    }
+
+    // One per person, so two mail robots can never keep answering each other
+    const [forCandidate, today] = await Promise.all([
+      this.prisma.candidateReply.count({
+        where: { candidateId: candidate.id, autoSent: true },
+      }),
+      this.prisma.candidateReply.count({
+        where: {
+          autoSent: true,
+          candidate: { jobId: job.id },
+          receivedAt: { gte: new Date(Date.now() - DAY_MS) },
+        },
+      }),
+    ]);
+
+    return forCandidate === 0 && today < MAX_AUTO_REPLIES_PER_DAY;
+  }
+
   private async readReply(replyId: string) {
     const reply = await this.prisma.candidateReply.findUniqueOrThrow({
       where: { id: replyId },
@@ -222,16 +263,23 @@ export class RepliesService implements OnModuleInit, OnModuleDestroy {
       await this.meetings.prepare(candidate.id, reply.conversationId, replyId);
     }
 
-    const action = reading.draft
-      ? await this.prisma.pendingAction.create({
-          data: {
-            conversationId: reply.conversationId,
-            type: PendingActionType.SEND_REPLY,
-            jobId: candidate.jobId,
-            replyId,
-          },
-        })
-      : null;
+    const autoSend = await this.canAutoSend(job, candidate, reply.body, reading);
+
+    const action =
+      reading.draft && !autoSend
+        ? await this.prisma.pendingAction.create({
+            data: {
+              conversationId: reply.conversationId,
+              type: PendingActionType.SEND_REPLY,
+              jobId: candidate.jobId,
+              replyId,
+            },
+          })
+        : null;
+
+    const draftStatus = autoSend
+      ? ReplyDraftStatus.APPROVED
+      : ReplyDraftStatus.PENDING_APPROVAL;
 
     await this.prisma.$transaction([
       this.prisma.candidateReply.update({
@@ -239,17 +287,22 @@ export class RepliesService implements OnModuleInit, OnModuleDestroy {
         data: {
           classification: reading.classification,
           draftBody: reading.draft,
-          draftStatus: reading.draft ? ReplyDraftStatus.PENDING_APPROVAL : null,
+          draftStatus: reading.draft ? draftStatus : null,
+          autoSent: autoSend,
         },
       }),
       this.prisma.message.updateMany({
         where: { replyId, cardType: CardType.CANDIDATE_REPLY },
         data: {
-          content: `${candidate.name ?? 'A candidate'} replied. ${CARD_MESSAGES[reading.classification]}`,
+          content: `${candidate.name ?? 'A candidate'} replied. ${autoSend ? AUTO_SENT_MESSAGE : CARD_MESSAGES[reading.classification]}`,
           pendingActionId: action?.id,
         },
       }),
     ]);
+
+    if (autoSend) {
+      await this.queue.add('send', { replyId }, JOB_OPTIONS);
+    }
 
     this.events.publish(reply.conversationId, { type: 'changed' });
   }
@@ -370,9 +423,9 @@ export class RepliesService implements OnModuleInit, OnModuleDestroy {
         data: {
           jobId: candidate.jobId,
           candidateId: candidate.id,
-          actor: ActivityActor.RECRUITER,
+          actor: reply.autoSent ? ActivityActor.AI : ActivityActor.RECRUITER,
           type: ActivityType.REPLY_SENT,
-          summary: `Replied to ${candidate.name ?? 'a candidate'}`,
+          summary: `${reply.autoSent ? 'Auto-replied' : 'Replied'} to ${candidate.name ?? 'a candidate'}`,
         },
       }),
     ]);

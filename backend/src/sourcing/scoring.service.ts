@@ -1,7 +1,8 @@
 // src/sourcing/scoring.service.ts
 import { Injectable } from '@nestjs/common';
-import { Candidate, Job } from '@prisma/client';
+import { Candidate, Job, LlmPurpose } from '@prisma/client';
 import { LlmService } from 'src/llm/llm.service';
+import { stripDelimiters } from 'src/llm/untrusted';
 
 const SYSTEM_PROMPT = `You score candidates against a job, from 0 to 100, with a one-sentence reason.
 
@@ -89,7 +90,7 @@ function describeCandidate(candidate: Candidate) {
     candidate.snippet && `Public text: ${candidate.snippet}`,
   ].filter(Boolean);
 
-  return `<candidate id="${candidate.id}">\n${facts.join('\n') || 'No public details'}\n</candidate>`;
+  return `<candidate id="${candidate.id}">\n${stripDelimiters(facts.join('\n')) || 'No public details'}\n</candidate>`;
 }
 
 @Injectable()
@@ -111,6 +112,7 @@ export class ScoringService {
       `Job:\n${requirements.join('\n')}\n\nCandidates:\n${candidates.map(describeCandidate).join('\n')}`,
       'candidate_scores',
       RESULT_SCHEMA,
+      { purpose: LlmPurpose.SCORING, jobId: job.id },
     );
 
     // Drops any id the model made up

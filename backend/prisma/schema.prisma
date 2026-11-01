@@ -141,6 +141,7 @@ enum ActivityType {
   REPLY_RECEIVED
   REPLY_SENT
   MEETING_BOOKED
+  AUTO_REPLY_CHANGED
 }
 
 enum CampaignStatus {
@@ -179,6 +180,13 @@ enum ReplyDraftStatus {
   DISCARDED
 }
 
+enum LlmPurpose {
+  CHAT
+  SCORING
+  DRAFTING
+  REPLY
+}
+
 enum QuestionStatus {
   PENDING
   ANSWERED
@@ -207,6 +215,7 @@ model Conversation {
   pendingActions PendingAction[]
   jobDrafts      JobDraft[]
   questions      AgentQuestion[]
+  llmUsage       LlmUsage[]
 
   @@index([userId, updatedAt])
 }
@@ -278,6 +287,8 @@ model Job {
   description      String        @db.Text
   sourceUrl        String?
   status           JobStatus     @default(OPEN)
+  // Off by default, so every reply waits for the recruiter until they choose otherwise
+  autoReply        Boolean       @default(false)
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
@@ -289,6 +300,7 @@ model Job {
   candidates     Candidate[]
   activityLogs   ActivityLog[]
   campaigns      Campaign[]
+  llmUsage       LlmUsage[]
 
   @@index([userId, createdAt])
 }
@@ -488,6 +500,7 @@ model CandidateReply {
   classification  ReplyClassification?
   draftBody       String?              @db.Text
   draftStatus     ReplyDraftStatus?
+  autoSent        Boolean              @default(false)
   sentAt          DateTime?
   messageId       String?
   previewUrl      String?
@@ -520,6 +533,24 @@ model Meeting {
 
   @@index([candidateId])
   @@index([startsAt])
+}
+
+// One row per AI call. Chat before a job exists has only a conversation, and is
+// moved onto the job when the recruiter confirms it.
+model LlmUsage {
+  id             String        @id @default(uuid())
+  jobId          String?
+  job            Job?          @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+  purpose        LlmPurpose
+  model          String
+  inputTokens    Int
+  outputTokens   Int
+  createdAt      DateTime      @default(now())
+
+  @@index([jobId])
+  @@index([conversationId])
 }
 
 // A paused LangGraph run waiting on the recruiter. The options are rows so the

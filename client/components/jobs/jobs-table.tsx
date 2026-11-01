@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { AutoReplyToggle } from "@/components/jobs/auto-reply-toggle";
 import {
   DataTable,
   numericCell,
@@ -24,12 +25,20 @@ const COLUMNS = [
   { label: "Meetings", numeric: true },
   { label: "Hires", numeric: true },
   { label: "Campaigns", numeric: true },
+  { label: "AI usage", numeric: true },
+  { label: "Auto-reply" },
   { label: "Created" },
 ];
 
+const compact = new Intl.NumberFormat("en-US", { notation: "compact" });
+
+function costLabel(costUsd: number) {
+  return costUsd > 0 && costUsd < 0.01 ? "under $0.01" : `$${costUsd.toFixed(2)}`;
+}
+
 export function JobsTable({ jobs }: { jobs: JobRow[] }) {
   return (
-    <DataTable caption="Jobs" columns={COLUMNS} className="min-w-4xl">
+    <DataTable caption="Jobs" columns={COLUMNS} className="min-w-6xl">
       {jobs.map((job) => (
         <tr key={job.id} className={tableRow}>
           <th scope="row" className={`${tableCell} text-left font-semibold`}>
@@ -63,6 +72,17 @@ export function JobsTable({ jobs }: { jobs: JobRow[] }) {
             <Link href={`/campaigns?jobId=${job.id}`} className={tableLink}>
               {job.campaigns}
             </Link>
+          </td>
+          <td className={numericCell}>
+            <span className="whitespace-nowrap">
+              {costLabel(job.usage.costUsd)}
+            </span>
+            <span className="block text-xs text-muted">
+              {compact.format(job.usage.tokens)} tokens
+            </span>
+          </td>
+          <td className={tableCell}>
+            <AutoReplyToggle job={job} />
           </td>
           <td className={`${tableCell} text-muted`}>
             <LocalTime value={job.createdAt} format="date" />
