@@ -24,7 +24,9 @@ Fill in `OPEN_AI_API_KEY`, `SERPER_API_KEY`, `JWT_SECRET`, `JWT_REFRESH_SECRET` 
 docker compose up --build
 ```
 
-Open <http://localhost:3000> and sign in with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. Migrations and the admin seed run when the backend starts. Set `CLIENT_PORT` to use a different port.
+This starts Postgres, Redis, the backend and the client. Open <http://localhost:3000> and sign in with `ADMIN_EMAIL` and `ADMIN_PASSWORD`. Migrations and the admin seed run when the backend starts. Set `CLIENT_PORT` to use a different port.
+
+Database and queue data are saved in `data/` at the repository root, so they survive `docker compose down`.
 
 ### Without Docker
 
