@@ -18,8 +18,10 @@ export function ProgressCard({ run }: { run: SourcingRun }) {
   const counts = [
     `Found ${run.foundCount}`,
     `scored ${run.scoredCount}`,
-    run.duplicateCount > 0 && `${run.duplicateCount} duplicates removed`,
-    run.skippedCount > 0 && `${run.skippedCount} rows skipped`,
+    run.duplicateCount > 0 &&
+      `${run.duplicateCount} ${run.duplicateCount === 1 ? "duplicate" : "duplicates"} removed`,
+    run.skippedCount > 0 &&
+      `${run.skippedCount} ${run.skippedCount === 1 ? "row" : "rows"} skipped`,
   ].filter(Boolean);
 
   return (

@@ -46,6 +46,12 @@ const ACTIVE_STATUSES: CampaignStatus[] = [
   CampaignStatus.PAUSED,
 ];
 
+// Checked at send time, because a status can change after the drafts were approved
+const NEVER_EMAIL: CandidateStatus[] = [
+  CandidateStatus.REJECTED,
+  CandidateStatus.UNSUBSCRIBED,
+];
+
 const UNSENT_STATUSES: EmailStatus[] = [EmailStatus.APPROVED, EmailStatus.SENDING];
 
 type OutreachPayload = { campaignId?: string; emailId?: string };
@@ -393,10 +399,15 @@ export class OutreachService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    if (!email.candidate.email || !recipient || recipient.stoppedAt) {
+    if (
+      !email.candidate.email ||
+      !recipient ||
+      recipient.stoppedAt ||
+      NEVER_EMAIL.includes(email.candidate.status)
+    ) {
       await this.prisma.outboundEmail.update({
         where: { id: emailId },
-        data: { status: EmailStatus.APPROVED },
+        data: { status: EmailStatus.STOPPED },
       });
       return;
     }
@@ -468,6 +479,30 @@ export class OutreachService implements OnModuleInit, OnModuleDestroy {
     await this.completeIfFinished(campaign.id);
   }
 
+  // A reply or unsubscribe ends this candidate's sequence in every campaign
+  async stopFollowUps(candidateId: string) {
+    await this.prisma.$transaction([
+      this.prisma.campaignRecipient.updateMany({
+        where: { candidateId, stoppedAt: null },
+        data: { stoppedAt: new Date() },
+      }),
+      this.prisma.outboundEmail.updateMany({
+        where: { candidateId, status: EmailStatus.APPROVED },
+        data: { status: EmailStatus.STOPPED },
+      }),
+    ]);
+
+    const recipients = await this.prisma.campaignRecipient.findMany({
+      where: { candidateId },
+      select: { campaign: { select: { id: true, conversationId: true } } },
+    });
+
+    for (const { campaign } of recipients) {
+      this.events.publish(campaign.conversationId, { type: 'changed' });
+      await this.completeIfFinished(campaign.id);
+    }
+  }
+
   private async completeIfFinished(campaignId: string) {
     const remaining = await this.prisma.outboundEmail.count({
       where: {
@@ -487,19 +522,24 @@ export class OutreachService implements OnModuleInit, OnModuleDestroy {
     const campaign = await this.prisma.campaign.findUniqueOrThrow({
       where: { id: campaignId },
     });
-    const [sent, failed] = await Promise.all(
-      [EmailStatus.SENT, EmailStatus.FAILED].map((status) =>
+    const [sent, failed, stopped] = await Promise.all(
+      [EmailStatus.SENT, EmailStatus.FAILED, EmailStatus.STOPPED].map((status) =>
         this.prisma.outboundEmail.count({
           where: { campaignStep: { campaignId }, status },
         }),
       ),
     );
 
+    const details = [
+      failed > 0 && `${failed} failed`,
+      stopped > 0 && `${stopped} stopped because the candidate replied`,
+    ].filter(Boolean);
+
     await this.chat.appendMessage(campaign.conversationId, {
       role: MessageRole.ASSISTANT,
       content:
-        failed > 0
-          ? `${campaign.name} finished. ${sent} emails were sent and ${failed} failed.`
+        details.length > 0
+          ? `${campaign.name} finished. ${sent} emails were sent, ${details.join(', and ')}.`
           : `${campaign.name} finished. All ${sent} emails were sent.`,
     });
   }
@@ -558,7 +598,9 @@ export class OutreachService implements OnModuleInit, OnModuleDestroy {
         recipients: {
           select: {
             stoppedAt: true,
-            candidate: { select: { id: true, name: true, email: true } },
+            candidate: {
+              select: { id: true, name: true, email: true, status: true },
+            },
           },
         },
         job: { select: { title: true } },

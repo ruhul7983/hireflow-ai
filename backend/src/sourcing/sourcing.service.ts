@@ -21,11 +21,13 @@ import { ChatService } from 'src/chat/chat.service';
 import { EventsService } from 'src/chat/events.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { queueOptions } from 'src/queue/redis-options';
+import { ParsedCandidate, parseSearchResult } from './candidate-parser';
 import {
-  ParsedCandidate,
+  CsvFormatError,
+  CsvMapping,
   parseCandidateCsv,
-  parseSearchResult,
-} from './candidate-parser';
+  previewCsv,
+} from './csv-mapping';
 import { ScoringService } from './scoring.service';
 import { SerperService } from './serper.service';
 
@@ -33,7 +35,6 @@ const SEARCH_QUEUE = 'sourcing';
 const SCORING_QUEUE = 'scoring';
 const SEARCH_PAGES = 3;
 const SCORING_BATCH_SIZE = 8;
-const MAX_CSV_ROWS = 1000;
 
 const JOB_OPTIONS = {
   attempts: 3,
@@ -113,26 +114,35 @@ export class SourcingService implements OnModuleInit, OnModuleDestroy {
     return run;
   }
 
+  // Shows the recruiter how the file reads, and saves nothing
+  previewCsv(file: Express.Multer.File) {
+    return this.readingCsv(() => previewCsv(file.buffer));
+  }
+
+  private readingCsv<T>(read: () => T) {
+    try {
+      return read();
+    } catch (error) {
+      if (error instanceof CsvFormatError) {
+        throw new BadRequestException(error.message);
+      }
+      throw error;
+    }
+  }
+
   async importCsv(
     job: JobRow,
     conversationId: string,
     file: Express.Multer.File,
+    mapping: CsvMapping,
   ) {
-    let parsed: ReturnType<typeof parseCandidateCsv>;
-    try {
-      parsed = parseCandidateCsv(file.buffer);
-    } catch {
-      throw new BadRequestException('That file could not be read as a CSV');
-    }
+    const parsed = this.readingCsv(() =>
+      parseCandidateCsv(file.buffer, mapping),
+    );
 
     if (parsed.candidates.length === 0) {
       throw new BadRequestException(
-        'No usable rows found. Each row needs an email or a profile URL.',
-      );
-    }
-    if (parsed.candidates.length > MAX_CSV_ROWS) {
-      throw new BadRequestException(
-        `Please upload ${MAX_CSV_ROWS} candidates or fewer at a time`,
+        'No usable rows with these matches. Check that the email or profile URL column holds real addresses.',
       );
     }
 

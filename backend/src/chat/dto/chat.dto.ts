@@ -1,15 +1,19 @@
 // src/chat/dto/chat.dto.ts
 import { CandidateStatus, RemotePolicy } from '@prisma/client';
+import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
   IsArray,
   IsEnum,
   IsIn,
+  IsInt,
   IsNotEmpty,
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   MaxLength,
+  Min,
 } from 'class-validator';
 
 const MAX_MESSAGE_LENGTH = 20_000;
@@ -63,6 +67,11 @@ export class DecideCandidateDto {
   decision: CandidateStatus;
 }
 
+export class UpdateCandidateStatusDto {
+  @IsEnum(CandidateStatus, { message: 'That status is not valid' })
+  status: CandidateStatus;
+}
+
 export class AnswerQuestionDto {
   @IsUUID()
   optionId: string;
@@ -71,4 +80,45 @@ export class AnswerQuestionDto {
 export class UploadCandidatesDto {
   @IsUUID()
   conversationId: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  nameColumn?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  lastNameColumn?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  emailColumn?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  profileUrlColumn?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  headlineColumn?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  locationColumn?: number;
+
+  // Comma separated positions, because multipart fields are plain strings
+  @IsOptional()
+  @Matches(/^\d+(,\d+)*$/, { message: 'Invalid detail columns' })
+  detailColumns?: string;
 }

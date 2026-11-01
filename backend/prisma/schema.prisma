@@ -32,7 +32,6 @@ model User {
   jobs          Job[]
 }
 
-
 model UserToken {
   id           String   @id @default(uuid())
   accessToken  String   @unique @db.Text
@@ -65,6 +64,8 @@ enum CardType {
   CAMPAIGN_DRAFTS
   CAMPAIGN_PROGRESS
   QUESTION
+  CANDIDATE_REPLY
+  MEETING_BOOKED
 }
 
 enum RemotePolicy {
@@ -84,6 +85,8 @@ enum PendingActionType {
   DECIDE_CANDIDATES
   CREATE_CAMPAIGN
   SEND_CAMPAIGN
+  SEND_REPLY
+  CHANGE_STATUS
 }
 
 enum PendingActionStatus {
@@ -135,6 +138,9 @@ enum ActivityType {
   CAMPAIGN_CREATED
   CAMPAIGN_APPROVED
   EMAIL_SENT
+  REPLY_RECEIVED
+  REPLY_SENT
+  MEETING_BOOKED
 }
 
 enum CampaignStatus {
@@ -153,6 +159,7 @@ enum EmailStatus {
   SENDING
   SENT
   FAILED
+  STOPPED
 }
 
 enum ReplyClassification {
@@ -166,7 +173,9 @@ enum ReplyClassification {
 enum ReplyDraftStatus {
   PENDING_APPROVAL
   APPROVED
+  SENDING
   SENT
+  FAILED
   DISCARDED
 }
 
@@ -177,6 +186,7 @@ enum QuestionStatus {
 }
 
 enum MeetingStatus {
+  DRAFTED
   LINK_SENT
   BOOKED
   COMPLETED
@@ -211,17 +221,21 @@ model Message {
   createdAt      DateTime     @default(now())
 
   jobDraftId      String?
-  jobDraft        JobDraft?      @relation(fields: [jobDraftId], references: [id], onDelete: SetNull)
+  jobDraft        JobDraft?       @relation(fields: [jobDraftId], references: [id], onDelete: SetNull)
   jobId           String?
-  job             Job?           @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  job             Job?            @relation(fields: [jobId], references: [id], onDelete: SetNull)
   sourcingRunId   String?
-  sourcingRun     SourcingRun?   @relation(fields: [sourcingRunId], references: [id], onDelete: SetNull)
+  sourcingRun     SourcingRun?    @relation(fields: [sourcingRunId], references: [id], onDelete: SetNull)
   pendingActionId String?
-  pendingAction   PendingAction? @relation(fields: [pendingActionId], references: [id], onDelete: SetNull)
+  pendingAction   PendingAction?  @relation(fields: [pendingActionId], references: [id], onDelete: SetNull)
   campaignId      String?
-  campaign        Campaign?      @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  campaign        Campaign?       @relation(fields: [campaignId], references: [id], onDelete: SetNull)
   questionId      String?
-  question        AgentQuestion? @relation(fields: [questionId], references: [id], onDelete: SetNull)
+  question        AgentQuestion?  @relation(fields: [questionId], references: [id], onDelete: SetNull)
+  replyId         String?
+  reply           CandidateReply? @relation(fields: [replyId], references: [id], onDelete: SetNull)
+  meetingId       String?
+  meeting         Meeting?        @relation(fields: [meetingId], references: [id], onDelete: SetNull)
 
   @@index([conversationId, createdAt])
 }
@@ -302,6 +316,9 @@ model PendingAction {
   dayOffsets   Int[]
   dailyLimit   Int?
   instructions String?   @db.Text
+
+  replyId String?
+  reply   CandidateReply? @relation(fields: [replyId], references: [id], onDelete: Cascade)
 
   candidates PendingActionCandidate[]
   messages   Message[]
@@ -452,35 +469,57 @@ model OutboundEmail {
   error          String?
   createdAt      DateTime     @default(now())
 
+  replies CandidateReply[]
+
   // Guarantees no candidate can ever receive the same step twice
   @@unique([campaignStepId, candidateId])
   @@index([status, dueAt])
 }
 
 model CandidateReply {
-  id             String               @id @default(uuid())
-  candidateId    String
-  candidate      Candidate            @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-  body           String               @db.Text
-  classification ReplyClassification?
-  draftBody      String?              @db.Text
-  draftStatus    ReplyDraftStatus?
-  receivedAt     DateTime             @default(now())
+  id              String               @id @default(uuid())
+  candidateId     String
+  candidate       Candidate            @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  conversationId  String
+  // The email being answered, kept for the reply's subject and threading
+  outboundEmailId String?
+  outboundEmail   OutboundEmail?       @relation(fields: [outboundEmailId], references: [id], onDelete: SetNull)
+  body            String               @db.Text
+  classification  ReplyClassification?
+  draftBody       String?              @db.Text
+  draftStatus     ReplyDraftStatus?
+  sentAt          DateTime?
+  messageId       String?
+  previewUrl      String?
+  error           String?
+  receivedAt      DateTime             @default(now())
+
+  messages       Message[]
+  pendingActions PendingAction[]
+  meeting        Meeting?
 
   @@index([candidateId, receivedAt])
 }
 
+// The token is the only thing on the public booking page's URL, so it must be
+// unguessable. The link works once the recruiter's email has gone out.
 model Meeting {
-  id          String        @id @default(uuid())
-  candidateId String
-  candidate   Candidate     @relation(fields: [candidateId], references: [id], onDelete: Cascade)
-  bookingUrl  String?
-  startsAt    DateTime?
-  status      MeetingStatus @default(LINK_SENT)
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id             String          @id @default(uuid())
+  candidateId    String
+  candidate      Candidate       @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+  conversationId String
+  replyId        String?         @unique
+  reply          CandidateReply? @relation(fields: [replyId], references: [id], onDelete: SetNull)
+  token          String          @unique
+  startsAt       DateTime?
+  status         MeetingStatus   @default(DRAFTED)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  messages Message[]
 
   @@index([candidateId])
+  @@index([startsAt])
 }
 
 // A paused LangGraph run waiting on the recruiter. The options are rows so the

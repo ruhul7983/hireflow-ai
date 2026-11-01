@@ -1,0 +1,418 @@
+// src/replies/replies.service.ts
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  Logger,
+  NotFoundException,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import {
+  ActivityActor,
+  ActivityType,
+  CandidateStatus,
+  CardType,
+  EmailStatus,
+  MessageRole,
+  PendingActionStatus,
+  PendingActionType,
+  ReplyClassification,
+  ReplyDraftStatus,
+} from '@prisma/client';
+import { Job as QueueJob, Queue, Worker } from 'bullmq';
+import { CandidatesService } from 'src/chat/candidates.service';
+import { ChatService } from 'src/chat/chat.service';
+import { EventsService } from 'src/chat/events.service';
+import { MeetingsService } from 'src/meetings/meetings.service';
+import { MailerService } from 'src/outreach/mailer.service';
+import { OutreachService } from 'src/outreach/outreach.service';
+import { PrismaService } from 'src/prisma/prisma.service';
+import { queueOptions } from 'src/queue/redis-options';
+import { ReplyReaderService } from './reply-reader.service';
+
+const QUEUE_NAME = 'replies';
+
+const JOB_OPTIONS = {
+  attempts: 3,
+  backoff: { type: 'exponential', delay: 2000 },
+  removeOnComplete: true,
+  removeOnFail: true,
+};
+
+const STATUS_BY_CLASSIFICATION: Record<ReplyClassification, CandidateStatus> = {
+  INTERESTED: CandidateStatus.INTERESTED,
+  WANTS_MEETING: CandidateStatus.INTERESTED,
+  QUESTION: CandidateStatus.REPLIED,
+  NOT_INTERESTED: CandidateStatus.NOT_INTERESTED,
+  UNSUBSCRIBE: CandidateStatus.UNSUBSCRIBED,
+};
+
+// A later reply must not undo progress. Only unsubscribing overrides these.
+const LATER_STAGES: CandidateStatus[] = [
+  CandidateStatus.MEETING_BOOKED,
+  CandidateStatus.INTERVIEWED,
+  CandidateStatus.SHORTLISTED,
+  CandidateStatus.HIRED,
+];
+
+const CARD_MESSAGES: Record<ReplyClassification, string> = {
+  INTERESTED: 'They sound interested. I drafted a reply for you to check.',
+  WANTS_MEETING: 'They want a meeting. I drafted a reply for you to check.',
+  QUESTION: 'They have a question. I drafted a reply for you to check.',
+  NOT_INTERESTED: "They're not interested. I drafted a polite reply for you to check.",
+  UNSUBSCRIBE:
+    "They asked not to be contacted. I've stopped all outreach to them, and nothing will be sent.",
+};
+
+type ReplyPayload = { replyId: string };
+
+function replySubject(subject: string | undefined, jobTitle: string) {
+  const original = subject ?? jobTitle;
+  return /^re:/i.test(original) ? original : `Re: ${original}`;
+}
+
+@Injectable()
+export class RepliesService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(RepliesService.name);
+  private queue: Queue<ReplyPayload>;
+  private worker: Worker<ReplyPayload>;
+  private lastWorkerError: string | null = null;
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly chat: ChatService,
+    private readonly events: EventsService,
+    private readonly mailer: MailerService,
+    private readonly outreach: OutreachService,
+    private readonly reader: ReplyReaderService,
+    private readonly candidates: CandidatesService,
+    private readonly meetings: MeetingsService,
+    private readonly configService: ConfigService,
+  ) {}
+
+  onModuleInit() {
+    const options = queueOptions(this.configService);
+
+    this.queue = new Queue(QUEUE_NAME, options);
+    this.worker = new Worker<ReplyPayload>(
+      QUEUE_NAME,
+      (job) =>
+        job.name === 'send'
+          ? this.sendDraft(job.data.replyId)
+          : this.readReply(job.data.replyId),
+      options,
+    );
+
+    this.worker.on('failed', (job, error) => {
+      void this.handleJobFailure(job, error);
+    });
+    this.worker.on('error', (error) => {
+      if (error.message === this.lastWorkerError) return;
+      this.lastWorkerError = error.message;
+      this.logger.error(error.message);
+    });
+  }
+
+  async onModuleDestroy() {
+    await this.worker.close();
+    await this.queue.close();
+  }
+
+  // Everything that must not wait for the AI happens here, before any model call
+  async receive(candidateId: string, userId: string, body: string) {
+    const candidate = await this.prisma.candidate.findFirst({
+      where: { id: candidateId, job: { userId } },
+    });
+
+    if (!candidate) {
+      throw new NotFoundException('Candidate not found');
+    }
+    if (candidate.status === CandidateStatus.UNSUBSCRIBED) {
+      throw new ConflictException('This candidate has unsubscribed');
+    }
+
+    const lastEmail = await this.prisma.outboundEmail.findFirst({
+      where: { candidateId, status: EmailStatus.SENT },
+      orderBy: { sentAt: 'desc' },
+      include: { campaignStep: { include: { campaign: true } } },
+    });
+
+    if (!lastEmail) {
+      throw new BadRequestException('This candidate has not been emailed yet');
+    }
+
+    const { conversationId } = lastEmail.campaignStep.campaign;
+    const reply = await this.prisma.candidateReply.create({
+      data: {
+        candidateId,
+        conversationId,
+        outboundEmailId: lastEmail.id,
+        body,
+      },
+    });
+
+    await this.outreach.stopFollowUps(candidateId);
+    await this.prisma.activityLog.create({
+      data: {
+        jobId: candidate.jobId,
+        candidateId,
+        actor: ActivityActor.SYSTEM,
+        type: ActivityType.REPLY_RECEIVED,
+        summary: `${candidate.name ?? 'A candidate'} replied`,
+      },
+    });
+
+    if (candidate.status === CandidateStatus.CONTACTED) {
+      await this.candidates.changeStatus(candidate, CandidateStatus.REPLIED, ActivityActor.SYSTEM);
+    }
+
+    await this.chat.appendMessage(conversationId, {
+      role: MessageRole.ASSISTANT,
+      content: `${candidate.name ?? 'A candidate'} replied. Their follow-ups are stopped while I read it.`,
+      cardType: CardType.CANDIDATE_REPLY,
+      replyId: reply.id,
+    });
+
+    await this.queue.add('read', { replyId: reply.id }, JOB_OPTIONS);
+    return reply;
+  }
+
+  private async readReply(replyId: string) {
+    const reply = await this.prisma.candidateReply.findUniqueOrThrow({
+      where: { id: replyId },
+      include: {
+        candidate: { include: { job: { include: { user: true } } } },
+        outboundEmail: {
+          include: { campaignStep: { include: { campaign: true } } },
+        },
+      },
+    });
+
+    // A retry after this point must not classify or draft a second time
+    if (reply.classification) return;
+
+    const { candidate, outboundEmail } = reply;
+    const { job } = candidate;
+
+    const reading = await this.reader.read({
+      job,
+      candidateName: candidate.name,
+      senderName:
+        outboundEmail?.campaignStep.campaign.senderName ??
+        job.user.name ??
+        job.user.email,
+      lastEmail: outboundEmail,
+      reply: reply.body,
+      hasBookedMeeting: await this.meetings.hasBookedMeeting(candidate.id),
+    });
+
+    const nextStatus = STATUS_BY_CLASSIFICATION[reading.classification];
+    const isUnsubscribe = reading.classification === ReplyClassification.UNSUBSCRIBE;
+
+    if (isUnsubscribe || !LATER_STAGES.includes(candidate.status)) {
+      await this.candidates.changeStatus(candidate, nextStatus, ActivityActor.AI);
+    }
+
+    if (isUnsubscribe) {
+      await this.meetings.cancelOpen(candidate.id);
+    }
+    if (reading.classification === ReplyClassification.WANTS_MEETING) {
+      await this.meetings.prepare(candidate.id, reply.conversationId, replyId);
+    }
+
+    const action = reading.draft
+      ? await this.prisma.pendingAction.create({
+          data: {
+            conversationId: reply.conversationId,
+            type: PendingActionType.SEND_REPLY,
+            jobId: candidate.jobId,
+            replyId,
+          },
+        })
+      : null;
+
+    await this.prisma.$transaction([
+      this.prisma.candidateReply.update({
+        where: { id: replyId },
+        data: {
+          classification: reading.classification,
+          draftBody: reading.draft,
+          draftStatus: reading.draft ? ReplyDraftStatus.PENDING_APPROVAL : null,
+        },
+      }),
+      this.prisma.message.updateMany({
+        where: { replyId, cardType: CardType.CANDIDATE_REPLY },
+        data: {
+          content: `${candidate.name ?? 'A candidate'} replied. ${CARD_MESSAGES[reading.classification]}`,
+          pendingActionId: action?.id,
+        },
+      }),
+    ]);
+
+    this.events.publish(reply.conversationId, { type: 'changed' });
+  }
+
+  private async findOwned(replyId: string, userId: string) {
+    const reply = await this.prisma.candidateReply.findFirst({
+      where: { id: replyId, candidate: { job: { userId } } },
+    });
+
+    if (!reply) {
+      throw new NotFoundException('Reply not found');
+    }
+    return reply;
+  }
+
+  async updateDraft(replyId: string, userId: string, draftBody: string) {
+    await this.findOwned(replyId, userId);
+
+    const { count } = await this.prisma.candidateReply.updateMany({
+      where: { id: replyId, draftStatus: ReplyDraftStatus.PENDING_APPROVAL },
+      data: { draftBody },
+    });
+
+    if (count === 0) {
+      throw new ConflictException('This reply can no longer be edited');
+    }
+    return { success: true };
+  }
+
+  // Called from the confirm path only, so a recruiter approves every email sent here
+  async approve(replyId: string) {
+    const { count } = await this.prisma.candidateReply.updateMany({
+      where: { id: replyId, draftStatus: ReplyDraftStatus.PENDING_APPROVAL },
+      data: { draftStatus: ReplyDraftStatus.APPROVED },
+    });
+
+    if (count === 0) {
+      throw new ConflictException('This reply is not waiting for approval');
+    }
+
+    await this.queue.add('send', { replyId }, JOB_OPTIONS);
+  }
+
+  async discard(replyId: string) {
+    await this.prisma.candidateReply.updateMany({
+      where: { id: replyId, draftStatus: ReplyDraftStatus.PENDING_APPROVAL },
+      data: { draftStatus: ReplyDraftStatus.DISCARDED },
+    });
+    await this.meetings.discardDraft(replyId);
+  }
+
+  private async sendDraft(replyId: string) {
+    // The atomic claim is what stops a retry sending the same reply twice
+    const { count } = await this.prisma.candidateReply.updateMany({
+      where: { id: replyId, draftStatus: ReplyDraftStatus.APPROVED },
+      data: { draftStatus: ReplyDraftStatus.SENDING },
+    });
+    if (count === 0) return;
+
+    const reply = await this.prisma.candidateReply.findUniqueOrThrow({
+      where: { id: replyId },
+      include: {
+        candidate: { include: { job: { include: { user: true } } } },
+        meeting: true,
+        outboundEmail: {
+          include: { campaignStep: { include: { campaign: true } } },
+        },
+      },
+    });
+    const { candidate, outboundEmail, meeting } = reply;
+
+    // They may have unsubscribed in a newer reply since this draft was approved
+    if (
+      !candidate.email ||
+      candidate.status === CandidateStatus.UNSUBSCRIBED
+    ) {
+      await this.prisma.candidateReply.update({
+        where: { id: replyId },
+        data: { draftStatus: ReplyDraftStatus.DISCARDED },
+      });
+      this.events.publish(reply.conversationId, { type: 'changed' });
+      return;
+    }
+
+    let result: Awaited<ReturnType<MailerService['send']>>;
+    try {
+      result = await this.mailer.send({
+        to: candidate.email,
+        senderName:
+          outboundEmail?.campaignStep.campaign.senderName ??
+          candidate.job.user.name ??
+          candidate.job.user.email,
+        subject: replySubject(outboundEmail?.subject, candidate.job.title),
+        body: meeting
+          ? this.meetings.withBookingLink(reply.draftBody ?? '', meeting.token)
+          : (reply.draftBody ?? ''),
+        inReplyTo: outboundEmail?.messageId ?? undefined,
+      });
+    } catch (error) {
+      // Nothing was delivered, so handing it back for the retry is safe
+      await this.prisma.candidateReply.update({
+        where: { id: replyId },
+        data: { draftStatus: ReplyDraftStatus.APPROVED },
+      });
+      throw error;
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.candidateReply.update({
+        where: { id: replyId },
+        data: {
+          draftStatus: ReplyDraftStatus.SENT,
+          sentAt: new Date(),
+          ...result,
+        },
+      }),
+      this.prisma.activityLog.create({
+        data: {
+          jobId: candidate.jobId,
+          candidateId: candidate.id,
+          actor: ActivityActor.RECRUITER,
+          type: ActivityType.REPLY_SENT,
+          summary: `Replied to ${candidate.name ?? 'a candidate'}`,
+        },
+      }),
+    ]);
+
+    // The link only starts working now that the recruiter's email has gone out
+    if (meeting) await this.meetings.markLinkSent(meeting.id);
+
+    this.events.publish(reply.conversationId, { type: 'changed' });
+  }
+
+  private async handleJobFailure(
+    job: QueueJob<ReplyPayload> | undefined,
+    error: Error,
+  ) {
+    this.logger.error(`Reply job failed: ${error.message}`);
+
+    // Earlier attempts will retry, so only the last failure is recorded
+    if (!job || job.attemptsMade < (job.opts.attempts ?? 1)) return;
+
+    const isSend = job.name === 'send';
+    const reply = await this.prisma.candidateReply.update({
+      where: { id: job.data.replyId },
+      data: {
+        error: error.message,
+        ...(isSend ? { draftStatus: ReplyDraftStatus.FAILED } : {}),
+      },
+    });
+
+    if (isSend) {
+      await this.prisma.pendingAction.updateMany({
+        where: { replyId: reply.id, status: PendingActionStatus.EXECUTED },
+        data: { status: PendingActionStatus.FAILED },
+      });
+    }
+
+    await this.chat.appendMessage(reply.conversationId, {
+      role: MessageRole.ASSISTANT,
+      content: isSend
+        ? "I couldn't send that reply after several tries, so it did not go out."
+        : "I couldn't read that reply after several tries. Follow-ups stay stopped, so please read it yourself on the card above.",
+    });
+  }
+}

@@ -1,4 +1,5 @@
 import { ActionButtons } from "@/components/chat/action-buttons";
+import { statusLabel } from "@/lib/candidate-status";
 import type { PendingAction } from "@/lib/chat-types";
 
 const STATUS_NOTES: Record<PendingAction["status"], string> = {
@@ -14,7 +15,13 @@ type DecisionCardProps = {
 };
 
 export function DecisionCard({ action, onChanged }: DecisionCardProps) {
-  const label = action.decision === "ACCEPTED" ? "Accept" : "Reject";
+  const count = action.candidates.length;
+  const label =
+    action.decision === "ACCEPTED"
+      ? `Accept ${count}`
+      : action.decision === "REJECTED"
+        ? `Reject ${count}`
+        : `Mark as ${statusLabel(action.decision ?? "").toLowerCase()}`;
 
   return (
     <div className="space-y-3 rounded-xl border border-line p-4">
@@ -44,7 +51,7 @@ export function DecisionCard({ action, onChanged }: DecisionCardProps) {
       {action.status === "PENDING" ? (
         <ActionButtons
           actionId={action.id}
-          confirmLabel={`${label} ${action.candidates.length}`}
+          confirmLabel={label}
           onChanged={onChanged}
         />
       ) : (

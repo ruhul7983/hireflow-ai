@@ -19,9 +19,12 @@ import {
 } from '@prisma/client';
 import { OutreachService } from 'src/outreach/outreach.service';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { RepliesService } from 'src/replies/replies.service';
 import { SourcingService } from 'src/sourcing/sourcing.service';
+import { statusLabel } from './candidate-status';
 import { CandidatesService } from './candidates.service';
 import { ChatService } from './chat.service';
+import { PipelineService } from './pipeline.service';
 
 export type JobDraftFields = {
   title: string | null;
@@ -65,11 +68,19 @@ export class ActionsService {
     private readonly sourcing: SourcingService,
     private readonly candidates: CandidatesService,
     private readonly outreach: OutreachService,
+    private readonly replies: RepliesService,
+    private readonly pipeline: PipelineService,
   ) {}
 
+  // Reply drafts are left out because several can wait at once, each to a different
+  // person, so "yes" in chat could send the wrong one. They're approved on their card.
   latestPending(conversationId: string) {
     return this.prisma.pendingAction.findFirst({
-      where: { conversationId, status: PendingActionStatus.PENDING },
+      where: {
+        conversationId,
+        status: PendingActionStatus.PENDING,
+        type: { not: PendingActionType.SEND_REPLY },
+      },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -163,6 +174,31 @@ export class ActionsService {
     };
   }
 
+  async proposeStatusChange(
+    conversationId: string,
+    candidate: { id: string; jobId: string; name: string | null },
+    status: CandidateStatus,
+  ): Promise<ProposedCard> {
+    await this.supersede(conversationId, PendingActionType.CHANGE_STATUS);
+
+    const action = await this.prisma.pendingAction.create({
+      data: {
+        conversationId,
+        type: PendingActionType.CHANGE_STATUS,
+        jobId: candidate.jobId,
+        decision: status,
+        candidates: { create: { candidateId: candidate.id } },
+      },
+    });
+
+    return {
+      content: `Please confirm you want to mark ${candidate.name ?? 'this candidate'} as ${statusLabel(status).toLowerCase()}.`,
+      cardType: CardType.CANDIDATE_DECISION,
+      pendingActionId: action.id,
+      jobId: candidate.jobId,
+    };
+  }
+
   async proposeCampaign(
     conversationId: string,
     jobId: string,
@@ -248,6 +284,9 @@ export class ActionsService {
     if (action.campaignId) {
       await this.outreach.discard(action.campaignId);
     }
+    if (action.replyId) {
+      await this.replies.discard(action.replyId);
+    }
 
     await this.chat.appendMessage(action.conversationId, {
       role: MessageRole.ASSISTANT,
@@ -266,11 +305,16 @@ export class ActionsService {
         return this.startSourcing(action, userId);
       case PendingActionType.DECIDE_CANDIDATES:
         return this.decideCandidates(action);
+      case PendingActionType.CHANGE_STATUS:
+        return this.changeStatus(action);
       case PendingActionType.CREATE_CAMPAIGN:
         return this.createCampaign(action, userId);
       case PendingActionType.SEND_CAMPAIGN:
         if (!action.campaignId) throw new Error('The campaign no longer exists');
         return this.outreach.approve(action.campaignId);
+      case PendingActionType.SEND_REPLY:
+        if (!action.replyId) throw new Error('The reply no longer exists');
+        return this.replies.approve(action.replyId);
     }
   }
 
@@ -362,6 +406,27 @@ export class ActionsService {
       instructions: action.instructions,
       senderName: user.name ?? user.email,
       candidateIds: action.candidates.map(({ candidateId }) => candidateId),
+    });
+  }
+
+  private async changeStatus(
+    action: Awaited<ReturnType<ActionsService['findOwned']>>,
+  ) {
+    const [target] = action.candidates;
+    if (!action.jobId || !action.decision || !target) {
+      throw new Error('The status change is incomplete');
+    }
+
+    await this.pipeline.updateStatus(
+      action.jobId,
+      target.candidateId,
+      action.decision,
+      ActivityActor.RECRUITER,
+    );
+
+    await this.chat.appendMessage(action.conversationId, {
+      role: MessageRole.ASSISTANT,
+      content: `Done. They're now marked as ${statusLabel(action.decision).toLowerCase()}, and the change is in the activity log.`,
     });
   }
 

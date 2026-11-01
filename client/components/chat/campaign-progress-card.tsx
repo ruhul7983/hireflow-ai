@@ -10,6 +10,7 @@ import {
   Play,
 } from "lucide-react";
 import { secondaryButton } from "@/components/chat/action-buttons";
+import { SimulateReplyButton } from "@/components/chat/simulate-reply-button";
 import { useCampaign } from "@/components/chat/use-campaign";
 import { api, errorMessage } from "@/lib/api";
 import type { OutboundEmail } from "@/lib/chat-types";
@@ -26,6 +27,7 @@ const EMAIL_LABELS: Record<OutboundEmail["status"], string> = {
   SENDING: "Sending",
   SENT: "Sent",
   FAILED: "Failed",
+  STOPPED: "Stopped",
 };
 
 const EMAIL_TONES: Record<OutboundEmail["status"], string> = {
@@ -34,6 +36,7 @@ const EMAIL_TONES: Record<OutboundEmail["status"], string> = {
   SENDING: "bg-warning-soft text-warning-strong",
   SENT: "bg-success-soft text-success-strong",
   FAILED: "bg-danger-soft text-danger-strong",
+  STOPPED: "bg-canvas text-muted",
 };
 
 type CampaignProgressCardProps = {
@@ -62,6 +65,7 @@ export function CampaignProgressCard({
   const { emails } = campaign;
   const sent = emails.filter(({ status }) => status === "SENT").length;
   const failed = emails.filter(({ status }) => status === "FAILED").length;
+  const stopped = emails.filter(({ status }) => status === "STOPPED").length;
   const share = emails.length > 0 ? (sent / emails.length) * 100 : 0;
   const isSending = campaign.status === "SENDING";
   const canToggle = isSending || campaign.status === "PAUSED";
@@ -72,6 +76,19 @@ export function CampaignProgressCard({
         ? "Finished with failures"
         : "Could not send"
       : (STATUS_LABELS[campaign.status] ?? campaign.status);
+
+  // One reply button per person, on the first email they actually received
+  const replyRows = new Set(
+    campaign.recipients.flatMap(({ candidate }) => {
+      const firstSent = emails.find(
+        ({ candidateId, status }) =>
+          candidateId === candidate.id && status === "SENT",
+      );
+      return firstSent && candidate.status !== "UNSUBSCRIBED"
+        ? [firstSent.id]
+        : [];
+    }),
+  );
 
   function names(candidateId: string) {
     const recipient = campaign?.recipients.find(
@@ -138,7 +155,9 @@ export function CampaignProgressCard({
 
         <p className="text-sm text-muted">
           {sent} of {emails.length} sent
-          {failed > 0 && `, ${failed} failed`}, up to {campaign.dailyLimit} a day
+          {failed > 0 && `, ${failed} failed`}
+          {stopped > 0 && `, ${stopped} stopped after a reply`}, up to{" "}
+          {campaign.dailyLimit} a day
         </p>
         {actionError && (
           <p role="alert" className="text-sm font-medium text-danger-strong">
@@ -148,12 +167,13 @@ export function CampaignProgressCard({
       </div>
 
       <div className="max-h-72 overflow-auto border-t border-line">
-        <table className="w-full min-w-md text-sm">
+        <table className="w-full min-w-lg text-sm">
           <thead className="sticky top-0 bg-surface text-left text-muted shadow-[0_1px_0_var(--color-line)]">
             <tr>
               <th scope="col" className="px-4 py-2 font-medium">Candidate</th>
               <th scope="col" className="py-2 pr-4 font-medium">Step</th>
               <th scope="col" className="py-2 pr-4 font-medium">Status</th>
+              <th scope="col" className="py-2 pr-4 font-medium">Reply</th>
               <th scope="col" className="py-2 pr-4 text-right font-medium">Email</th>
             </tr>
           </thead>
@@ -177,6 +197,15 @@ export function CampaignProgressCard({
                     <span className="mt-1 block text-xs text-danger-strong">
                       {email.error}
                     </span>
+                  )}
+                </td>
+                <td className="py-2 pr-4">
+                  {replyRows.has(email.id) && (
+                    <SimulateReplyButton
+                      candidateId={email.candidateId}
+                      candidateName={names(email.candidateId)}
+                      onChanged={onChanged}
+                    />
                   )}
                 </td>
                 <td className="py-2 pr-4 text-right">

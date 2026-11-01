@@ -43,7 +43,7 @@ export type SourcingRun = {
 export type PendingAction = {
   id: string;
   status: "PENDING" | "EXECUTED" | "CANCELLED" | "FAILED";
-  decision: "ACCEPTED" | "REJECTED" | null;
+  decision: string | null;
   jobId: string | null;
   campaignName: string | null;
   dayOffsets: number[];
@@ -70,7 +70,9 @@ export type CardType =
   | "CAMPAIGN_PROPOSAL"
   | "CAMPAIGN_DRAFTS"
   | "CAMPAIGN_PROGRESS"
-  | "QUESTION";
+  | "QUESTION"
+  | "CANDIDATE_REPLY"
+  | "MEETING_BOOKED";
 
 export type AgentQuestion = {
   id: string;
@@ -82,6 +84,54 @@ export type AgentQuestion = {
     description: string | null;
     recommended: boolean;
   }[];
+};
+
+type MeetingStatus =
+  | "DRAFTED"
+  | "LINK_SENT"
+  | "BOOKED"
+  | "COMPLETED"
+  | "CANCELLED";
+
+export type MeetingSummary = {
+  status: MeetingStatus;
+  startsAt: string | null;
+  candidate: { name: string | null; email: string | null };
+};
+
+export type PublicMeeting = {
+  status: MeetingStatus;
+  startsAt: string | null;
+  firstName: string | null;
+  jobTitle: string;
+  hostName: string;
+  slots: string[];
+};
+
+export type ReplyClassification =
+  | "INTERESTED"
+  | "WANTS_MEETING"
+  | "QUESTION"
+  | "NOT_INTERESTED"
+  | "UNSUBSCRIBE";
+
+export type CandidateReply = {
+  id: string;
+  body: string;
+  classification: ReplyClassification | null;
+  draftBody: string | null;
+  draftStatus:
+    | "PENDING_APPROVAL"
+    | "APPROVED"
+    | "SENDING"
+    | "SENT"
+    | "FAILED"
+    | "DISCARDED"
+    | null;
+  previewUrl: string | null;
+  error: string | null;
+  candidate: { id: string; name: string | null; email: string | null };
+  meeting: { status: MeetingStatus; token: string } | null;
 };
 
 export type ChatMessage = {
@@ -96,6 +146,8 @@ export type ChatMessage = {
   sourcingRun: SourcingRun | null;
   pendingAction: PendingAction | null;
   question: AgentQuestion | null;
+  reply: CandidateReply | null;
+  meeting: MeetingSummary | null;
 };
 
 export type Conversation = ConversationSummary & { messages: ChatMessage[] };
@@ -113,6 +165,17 @@ export type Candidate = {
   scoreReason: string | null;
   // Later pipeline stages arrive with outreach, so review treats them as decided
   status: CandidateStatus | string;
+  nextStatuses: string[];
+};
+
+export type ActivityEntry = {
+  id: string;
+  actor: "RECRUITER" | "AI" | "SYSTEM";
+  summary: string;
+  fromStatus: string | null;
+  toStatus: string | null;
+  createdAt: string;
+  job: { title: string };
 };
 
 export type OutboundEmail = {
@@ -121,7 +184,7 @@ export type OutboundEmail = {
   candidateId: string;
   subject: string;
   body: string;
-  status: "DRAFT" | "APPROVED" | "SENDING" | "SENT" | "FAILED";
+  status: "DRAFT" | "APPROVED" | "SENDING" | "SENT" | "FAILED" | "STOPPED";
   dueAt: string | null;
   sentAt: string | null;
   previewUrl: string | null;
@@ -143,9 +206,28 @@ export type Campaign = {
   steps: { id: string; position: number; dayOffset: number }[];
   recipients: {
     stoppedAt: string | null;
-    candidate: { id: string; name: string | null; email: string | null };
+    candidate: {
+      id: string;
+      name: string | null;
+      email: string | null;
+      status: string;
+    };
   }[];
   emails: OutboundEmail[];
+};
+
+export type CsvField =
+  | "name"
+  | "lastName"
+  | "email"
+  | "profileUrl"
+  | "headline"
+  | "location";
+
+export type CsvPreview = {
+  rowCount: number;
+  columns: { index: number; name: string; samples: string[] }[];
+  suggestion: Partial<Record<CsvField, number>> & { detailColumns: number[] };
 };
 
 export type ChatEvent =

@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { BACKEND_URL } from "@/lib/backend";
 
 const PUBLIC_PATHS = ["/login"];
+const PUBLIC_PREFIX = "/book/"; // Candidates open booking links without an account
 
 async function rotateSession(refreshToken: string) {
   try {
@@ -41,7 +42,11 @@ export async function proxy(request: NextRequest) {
     return response;
   }
 
-  const response = PUBLIC_PATHS.includes(request.nextUrl.pathname)
+  const { pathname } = request.nextUrl;
+  const isPublic =
+    PUBLIC_PATHS.includes(pathname) || pathname.startsWith(PUBLIC_PREFIX);
+
+  const response = isPublic
     ? NextResponse.next()
     : NextResponse.redirect(new URL("/login", request.url));
 

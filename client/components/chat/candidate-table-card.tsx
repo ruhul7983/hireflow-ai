@@ -5,12 +5,14 @@ import { ExternalLink } from "lucide-react";
 import { secondaryButton } from "@/components/chat/action-buttons";
 import { CsvUploadButton } from "@/components/chat/csv-upload-button";
 import { api, errorMessage } from "@/lib/api";
+import { statusLabel } from "@/lib/candidate-status";
 import type { Candidate } from "@/lib/chat-types";
 
 const FILTERS = [
   { key: "SOURCED", label: "To review" },
   { key: "ACCEPTED", label: "Accepted" },
   { key: "REJECTED", label: "Rejected" },
+  { key: "PIPELINE", label: "In pipeline" },
   { key: "ALL", label: "All" },
 ] as const;
 
@@ -25,6 +27,7 @@ function scoreTone(score: number) {
 }
 
 function matches(candidate: Candidate, filter: Filter) {
+  if (filter === "PIPELINE") return !REVIEWABLE.includes(candidate.status);
   return filter === "ALL" || candidate.status === filter;
 }
 
@@ -74,6 +77,26 @@ export function CandidateTableCard({
       setCandidates((rows) =>
         (rows ?? []).map((row) =>
           row.id === candidateId ? { ...row, status: decision } : row,
+        ),
+      );
+      onChanged();
+    } catch (cause) {
+      setError(errorMessage(cause));
+    }
+    setBusyId(null);
+  }
+
+  async function moveTo(candidateId: string, status: string) {
+    setBusyId(candidateId);
+    setError(null);
+    try {
+      await api(`/jobs/${jobId}/candidates/${candidateId}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+      setCandidates((rows) =>
+        (rows ?? []).map((row) =>
+          row.id === candidateId ? { ...row, status } : row,
         ),
       );
       onChanged();
@@ -216,9 +239,29 @@ export function CandidateTableCard({
                   </td>
                   <td className="py-3 pr-4">
                     {!REVIEWABLE.includes(candidate.status) ? (
-                      <p className="text-right text-xs font-semibold text-brand-strong capitalize">
-                        {candidate.status.toLowerCase().replaceAll("_", " ")}
-                      </p>
+                      <div className="flex flex-col items-end gap-1">
+                        <span className="text-xs font-semibold text-brand-strong">
+                          {statusLabel(candidate.status)}
+                        </span>
+                        {candidate.nextStatuses.length > 0 && (
+                          <select
+                            value=""
+                            disabled={busyId === candidate.id}
+                            aria-label={`Move ${candidate.name ?? "candidate"} to another stage`}
+                            onChange={(event) =>
+                              moveTo(candidate.id, event.target.value)
+                            }
+                            className="max-w-36 rounded-md border border-muted/70 bg-surface px-1.5 py-1 text-xs outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 disabled:opacity-60"
+                          >
+                            <option value="">Move to…</option>
+                            {candidate.nextStatuses.map((status) => (
+                              <option key={status} value={status}>
+                                {statusLabel(status)}
+                              </option>
+                            ))}
+                          </select>
+                        )}
+                      </div>
                     ) : (
                       <div className="flex justify-end gap-1.5">
                         <button

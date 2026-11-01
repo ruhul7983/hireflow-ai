@@ -14,6 +14,7 @@ export type OutgoingEmail = {
   senderName: string;
   subject: string;
   body: string;
+  inReplyTo?: string;
 };
 
 @Injectable()
@@ -68,7 +69,7 @@ export class MailerService {
     return this.mailbox;
   }
 
-  async send({ to, senderName, subject, body }: OutgoingEmail) {
+  async send({ to, senderName, subject, body, inReplyTo }: OutgoingEmail) {
     const { transporter, from } = await this.getMailbox();
 
     const info = await transporter.sendMail({
@@ -76,6 +77,8 @@ export class MailerService {
       to,
       subject,
       text: `${body}${UNSUBSCRIBE_FOOTER}`,
+      inReplyTo,
+      references: inReplyTo,
     });
 
     return {

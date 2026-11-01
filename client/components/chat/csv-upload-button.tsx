@@ -4,7 +4,9 @@ import { useRef, useState } from "react";
 import type { ChangeEvent } from "react";
 import { Upload } from "lucide-react";
 import { secondaryButton } from "@/components/chat/action-buttons";
+import { CsvColumnDialog } from "@/components/chat/csv-column-dialog";
 import { api, errorMessage } from "@/lib/api";
+import type { CsvPreview } from "@/lib/chat-types";
 
 type CsvUploadButtonProps = {
   jobId: string;
@@ -20,6 +22,10 @@ export function CsvUploadButton({
   const inputRef = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [upload, setUpload] = useState<{
+    file: File;
+    preview: CsvPreview;
+  } | null>(null);
 
   async function handleFile(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -27,14 +33,16 @@ export function CsvUploadButton({
     if (!file) return;
 
     const form = new FormData();
-    form.append("conversationId", conversationId);
     form.append("file", file);
 
     setPending(true);
     setError(null);
     try {
-      await api(`/jobs/${jobId}/candidates/csv`, { method: "POST", body: form });
-      onChanged();
+      const preview = await api<CsvPreview>(
+        `/jobs/${jobId}/candidates/csv/preview`,
+        { method: "POST", body: form },
+      );
+      setUpload({ file, preview });
     } catch (cause) {
       setError(errorMessage(cause));
     }
@@ -46,7 +54,7 @@ export function CsvUploadButton({
       <input
         ref={inputRef}
         type="file"
-        accept=".csv,text/csv"
+        accept=".csv,.tsv,.txt,text/csv"
         onChange={handleFile}
         aria-label="Upload a CSV of candidates"
         className="hidden"
@@ -58,12 +66,26 @@ export function CsvUploadButton({
         className={`${secondaryButton} flex items-center gap-2`}
       >
         <Upload className="size-4" aria-hidden />
-        {pending ? "Uploading…" : "Upload CSV"}
+        {pending ? "Reading…" : "Upload CSV"}
       </button>
       {error && (
         <p role="alert" className="w-full text-sm font-medium text-danger-strong">
           {error}
         </p>
+      )}
+      {upload && (
+        <CsvColumnDialog
+          key={upload.file.name}
+          file={upload.file}
+          preview={upload.preview}
+          jobId={jobId}
+          conversationId={conversationId}
+          onClose={() => setUpload(null)}
+          onImported={() => {
+            setUpload(null);
+            onChanged();
+          }}
+        />
       )}
     </>
   );

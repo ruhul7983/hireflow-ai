@@ -26,7 +26,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Jobs", icon: Briefcase },
   { label: "Candidates", icon: Users },
   { label: "Campaigns", icon: Mail },
-  { label: "Activity", icon: Activity },
+  { label: "Activity", icon: Activity, href: "/activity" },
 ];
 
 const itemClass =

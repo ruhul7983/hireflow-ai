@@ -16,6 +16,11 @@ import { LlmService } from 'src/llm/llm.service';
 import { OutreachService } from 'src/outreach/outreach.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { ActionsService, ProposedCard } from './actions.service';
+import {
+  nextStatuses,
+  RECRUITER_TARGETS,
+  statusLabel,
+} from './candidate-status';
 import { CandidatesService } from './candidates.service';
 import { ChatService } from './chat.service';
 import { readPublicPage } from './url-reader';
@@ -38,6 +43,8 @@ const ACTION_LABELS: Record<PendingActionType, string> = {
   DECIDE_CANDIDATES: 'the candidate decisions on the confirmation card',
   CREATE_CAMPAIGN: 'the campaign plan on the confirmation card',
   SEND_CAMPAIGN: 'approving the email drafts on the review card',
+  SEND_REPLY: 'a reply draft on its card',
+  CHANGE_STATUS: 'the status change on the confirmation card',
 };
 
 const SYSTEM_PROMPT = `You are HireFlow, an AI recruiting co-worker. A recruiter talks to you to run hiring, from job description to hire.
@@ -53,9 +60,12 @@ How you work:
 - When the recruiter wants to contact accepted candidates, call start_campaign_setup straight away. Never ask about campaign details yourself, because the setup asks the recruiter with buttons. Pass a value only if the recruiter stated it in their message, and use null for everything else. Never guess or suggest values.
 - If you are told a campaign setup question is waiting, answer what they asked and then point them back to the buttons. Don't start another setup unless they ask to.
 - You can't send email or approve drafts. The recruiter approves drafts on the review card. Emails are personalised per candidate, so you can't change them from chat. The recruiter edits them on the card.
-- Handling replies, meetings and status changes after review aren't available yet. If asked, say that they're coming next.`;
+- Candidate replies are classified automatically and shown on their own cards. Each reply draft is approved on its card, never from chat. You can't send a reply or change a draft.
+- When a reply wants a meeting, a booking link goes out with the approved reply and the candidate picks a time themselves. You can't book, move or cancel meetings.
+- When the recruiter wants to change a candidate's stage, such as "mark Rahim as hired", call propose_status_change with the name as they said it. A card asks them to confirm. If several people match, ask which one they mean.`;
 
 const nullableString = { type: ['string', 'null'] };
+const MAX_NAME_MATCHES = 6;
 
 const TOOLS: ChatCompletionTool[] = [
   {
@@ -206,6 +216,27 @@ const TOOLS: ChatCompletionTool[] = [
             ...nullableString,
             description: 'Only if the recruiter stated a tone or focus. Otherwise null.',
           },
+        },
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'propose_status_change',
+      description:
+        "Ask the recruiter to confirm moving one candidate to a new pipeline stage. Changes nothing until they confirm.",
+      strict: true,
+      parameters: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['candidate_name', 'status'],
+        properties: {
+          candidate_name: {
+            type: 'string',
+            description: 'The name exactly as the recruiter said it',
+          },
+          status: { type: 'string', enum: RECRUITER_TARGETS },
         },
       },
     },
@@ -439,6 +470,8 @@ export class AgentService {
           return await this.proposeDecision(args, state);
         case 'start_campaign_setup':
           return await this.startCampaignSetup(args, state);
+        case 'propose_status_change':
+          return await this.proposeStatusChange(args, state);
         case 'list_jobs':
           return await this.listJobs(state);
         case 'get_job_stats':
@@ -576,6 +609,47 @@ export class AgentService {
 
     state.handedOff = true;
     return 'The setup is asking the recruiter.';
+  }
+
+  private async proposeStatusChange(args: Record<string, any>, state: TurnState) {
+    const { jobId } = state.conversation;
+    const status = args.status as CandidateStatus;
+
+    // Outside a job's chat the name is searched across all of the recruiter's jobs
+    const matches = await this.prisma.candidate.findMany({
+      where: {
+        name: { contains: args.candidate_name, mode: 'insensitive' },
+        job: { userId: state.userId },
+        ...(jobId ? { jobId } : {}),
+      },
+      include: { job: { select: { title: true } } },
+      take: MAX_NAME_MATCHES,
+    });
+
+    if (matches.length === 0) {
+      return `Nobody called ${args.candidate_name} was found. Say so, and don't guess.`;
+    }
+    if (matches.length > 1) {
+      const names = matches
+        .map(({ name, job }) => `${name} (${job.title})`)
+        .join(', ');
+      return `Several people match: ${names}. Ask which one they mean.`;
+    }
+
+    const [candidate] = matches;
+    if (!nextStatuses(candidate.status).includes(status)) {
+      const allowed = nextStatuses(candidate.status).map(statusLabel).join(', ');
+      return `${candidate.name} is ${statusLabel(candidate.status)}, so they can't move to ${statusLabel(status)}. Allowed next: ${allowed || 'none'}.`;
+    }
+
+    state.cards.push(
+      await this.actions.proposeStatusChange(
+        state.conversation.id,
+        candidate,
+        status,
+      ),
+    );
+    return 'The confirmation card is showing. Nothing changes until they confirm.';
   }
 
   private async listJobs(state: TurnState) {

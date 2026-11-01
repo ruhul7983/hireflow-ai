@@ -34,10 +34,12 @@ import {
   AnswerQuestionDto,
   DecideCandidateDto,
   SendMessageDto,
+  UpdateCandidateStatusDto,
   UpdateJobDraftDto,
   UploadCandidatesDto,
 } from './dto/chat.dto';
 import { EventsService } from './events.service';
+import { PipelineService } from './pipeline.service';
 
 const HEARTBEAT_MS = 20_000;
 const MAX_CSV_BYTES = 2 * 1024 * 1024;
@@ -54,6 +56,7 @@ export class ChatController {
     private readonly sourcing: SourcingService,
     private readonly events: EventsService,
     private readonly campaignSetup: CampaignSetupService,
+    private readonly pipeline: PipelineService,
   ) {}
 
   @Get('chat/conversations')
@@ -202,6 +205,48 @@ export class ChatController {
     return { success: true };
   }
 
+  // A direct choice in the table. Using the control is the recruiter's confirmation.
+  @Patch('jobs/:id/candidates/:candidateId/status')
+  async updateCandidateStatus(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Param('candidateId', ParseUUIDPipe) candidateId: string,
+    @Body() dto: UpdateCandidateStatusDto,
+    @GetUser('id') userId: string,
+  ) {
+    await this.candidates.assertJobOwned(id, userId);
+    await this.pipeline.updateStatus(
+      id,
+      candidateId,
+      dto.status,
+      ActivityActor.RECRUITER,
+    );
+    return { success: true };
+  }
+
+  @Get('activity')
+  listActivity(@GetUser('id') userId: string) {
+    return this.candidates.activity(userId);
+  }
+
+  // Reads the file so the recruiter can match its columns. Nothing is saved here.
+  @Post('jobs/:id/candidates/csv/preview')
+  @HttpCode(HttpStatus.OK)
+  @UseInterceptors(
+    FileInterceptor('file', { limits: { fileSize: MAX_CSV_BYTES } }),
+  )
+  async previewCandidates(
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file: Express.Multer.File | undefined,
+    @GetUser('id') userId: string,
+  ) {
+    if (!file) {
+      throw new BadRequestException('Choose a CSV file to upload');
+    }
+
+    await this.candidates.assertJobOwned(id, userId);
+    return this.sourcing.previewCsv(file);
+  }
+
   @Post('jobs/:id/candidates/csv')
   @UseInterceptors(
     FileInterceptor('file', { limits: { fileSize: MAX_CSV_BYTES } }),
@@ -219,7 +264,15 @@ export class ChatController {
     const job = await this.candidates.assertJobOwned(id, userId);
     await this.chat.assertOwned(dto.conversationId, userId);
 
-    const run = await this.sourcing.importCsv(job, dto.conversationId, file);
+    const run = await this.sourcing.importCsv(job, dto.conversationId, file, {
+      name: dto.nameColumn,
+      lastName: dto.lastNameColumn,
+      email: dto.emailColumn,
+      profileUrl: dto.profileUrlColumn,
+      headline: dto.headlineColumn,
+      location: dto.locationColumn,
+      detailColumns: dto.detailColumns?.split(',').map(Number) ?? [],
+    });
     return { success: true, runId: run.id };
   }
 }

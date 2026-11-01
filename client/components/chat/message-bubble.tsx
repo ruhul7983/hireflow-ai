@@ -6,8 +6,10 @@ import { CandidateTableCard } from "@/components/chat/candidate-table-card";
 import { DecisionCard } from "@/components/chat/decision-card";
 import { JobCreatedCard } from "@/components/chat/job-created-card";
 import { JobDraftCard } from "@/components/chat/job-draft-card";
+import { MeetingBookedCard } from "@/components/chat/meeting-booked-card";
 import { ProgressCard } from "@/components/chat/progress-card";
 import { QuestionCard } from "@/components/chat/question-card";
+import { ReplyCard } from "@/components/chat/reply-card";
 import { SourcingPromptCard } from "@/components/chat/sourcing-prompt-card";
 import type { ChatMessage } from "@/lib/chat-types";
 
@@ -28,6 +30,8 @@ function Card({ message, conversationId, refreshKey, onChanged }: MessageBubbleP
     jobId,
     campaignId,
     question,
+    reply,
+    meeting,
   } = message;
 
   if (cardType === "JOB_DRAFT" && jobDraft && pendingAction) {
@@ -92,6 +96,14 @@ function Card({ message, conversationId, refreshKey, onChanged }: MessageBubbleP
   }
   if (cardType === "QUESTION" && question) {
     return <QuestionCard question={question} onChanged={onChanged} />;
+  }
+  if (cardType === "CANDIDATE_REPLY" && reply) {
+    return (
+      <ReplyCard reply={reply} action={pendingAction} onChanged={onChanged} />
+    );
+  }
+  if (cardType === "MEETING_BOOKED" && meeting) {
+    return <MeetingBookedCard meeting={meeting} />;
   }
   return null;
 }

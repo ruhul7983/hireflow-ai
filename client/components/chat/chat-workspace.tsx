@@ -46,6 +46,8 @@ function optimisticMessage(content: string): ChatMessage {
     sourcingRun: null,
     pendingAction: null,
     question: null,
+    reply: null,
+    meeting: null,
   };
 }
 
