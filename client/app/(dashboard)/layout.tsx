@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import { SkeletonBlock } from "@/components/dashboard/dashboard-skeleton";
 import { LogoutButton } from "@/components/logout-button";
 import { Sidebar } from "@/components/sidebar";
 import { requireSessionUser } from "@/lib/auth";
@@ -26,12 +27,27 @@ async function Account() {
   );
 }
 
+function AccountSkeleton() {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-3">
+        <SkeletonBlock className="size-9 shrink-0 rounded-full" />
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <SkeletonBlock className="h-4 w-24" />
+          <SkeletonBlock className="h-3 w-full" />
+        </div>
+      </div>
+      <SkeletonBlock className="h-9 w-full rounded-lg" />
+    </div>
+  );
+}
+
 export default function DashboardLayout({ children }: LayoutProps<"/">) {
   return (
     <div className="min-h-dvh lg:pl-64">
       <Sidebar
         account={
-          <Suspense fallback={null}>
+          <Suspense fallback={<AccountSkeleton />}>
             <Account />
           </Suspense>
         }

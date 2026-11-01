@@ -17,20 +17,14 @@ import {
 import type { LucideIcon } from "lucide-react";
 import { Wordmark } from "@/components/wordmark";
 
-type NavItem = { label: string; icon: LucideIcon; href?: string };
-
-// Items without an href are shown as upcoming, so they can't lead to a 404
-const NAV_ITEMS: NavItem[] = [
+const NAV_ITEMS: { label: string; icon: LucideIcon; href: string }[] = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/" },
   { label: "Chat", icon: MessageSquare, href: "/chat" },
-  { label: "Jobs", icon: Briefcase },
-  { label: "Candidates", icon: Users },
-  { label: "Campaigns", icon: Mail },
+  { label: "Jobs", icon: Briefcase, href: "/jobs" },
+  { label: "Candidates", icon: Users, href: "/candidates" },
+  { label: "Campaigns", icon: Mail, href: "/campaigns" },
   { label: "Activity", icon: Activity, href: "/activity" },
 ];
-
-const itemClass =
-  "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium";
 
 export function Sidebar({ account }: { account: ReactNode }) {
   const pathname = usePathname();
@@ -95,29 +89,19 @@ export function Sidebar({ account }: { account: ReactNode }) {
           <ul className="space-y-1">
             {NAV_ITEMS.map(({ label, icon: Icon, href }) => (
               <li key={label}>
-                {href ? (
-                  <Link
-                    href={href}
-                    onClick={() => setOpen(false)}
-                    aria-current={pathname === href ? "page" : undefined}
-                    className={`${itemClass} transition-colors focus-visible:outline-2 focus-visible:outline-brand ${
-                      pathname === href
-                        ? "bg-brand-soft text-brand-strong"
-                        : "text-muted hover:bg-canvas hover:text-ink"
-                    }`}
-                  >
-                    <Icon className="size-4.5" aria-hidden />
-                    {label}
-                  </Link>
-                ) : (
-                  <span aria-disabled className={`${itemClass} text-muted`}>
-                    <Icon className="size-4.5" aria-hidden />
-                    {label}
-                    <span className="ml-auto rounded bg-canvas px-1.5 py-0.5 text-[0.625rem] font-semibold">
-                      Soon
-                    </span>
-                  </span>
-                )}
+                <Link
+                  href={href}
+                  onClick={() => setOpen(false)}
+                  aria-current={pathname === href ? "page" : undefined}
+                  className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-brand ${
+                    pathname === href
+                      ? "bg-brand-soft text-brand-strong"
+                      : "text-muted hover:bg-canvas hover:text-ink"
+                  }`}
+                >
+                  <Icon className="size-4.5" aria-hidden />
+                  {label}
+                </Link>
               </li>
             ))}
           </ul>

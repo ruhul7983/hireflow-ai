@@ -1,5 +1,5 @@
 // src/chat/dto/chat.dto.ts
-import { CandidateStatus, RemotePolicy } from '@prisma/client';
+import { ActivityActor, CandidateStatus, RemotePolicy } from '@prisma/client';
 import { Type } from 'class-transformer';
 import {
   ArrayMaxSize,
@@ -15,6 +15,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { JobPageQueryDto } from 'src/common/pagination';
 
 const MAX_MESSAGE_LENGTH = 20_000;
 const MAX_SKILLS = 30;
@@ -70,6 +71,18 @@ export class DecideCandidateDto {
 export class UpdateCandidateStatusDto {
   @IsEnum(CandidateStatus, { message: 'That status is not valid' })
   status: CandidateStatus;
+}
+
+export class CandidateQueryDto extends JobPageQueryDto {
+  @IsOptional()
+  @IsEnum(CandidateStatus, { message: 'That status is not valid' })
+  status?: CandidateStatus;
+}
+
+export class ActivityQueryDto extends JobPageQueryDto {
+  @IsOptional()
+  @IsEnum(ActivityActor, { message: 'That actor is not valid' })
+  actor?: ActivityActor;
 }
 
 export class AnswerQuestionDto {

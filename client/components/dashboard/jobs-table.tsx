@@ -1,6 +1,10 @@
 import Link from "next/link";
 import { Panel } from "@/components/dashboard/panel";
-import { formatPercentage } from "@/lib/dashboard-format";
+import {
+  formatPercentage,
+  jobLocation,
+  PHASE_TONES,
+} from "@/lib/dashboard-format";
 import type { DashboardJob } from "@/lib/dashboard-types";
 
 const NUMERIC_COLUMNS = [
@@ -10,20 +14,6 @@ const NUMERIC_COLUMNS = [
   "Meetings",
   "Hires",
 ];
-
-const PHASE_TONES: Record<DashboardJob["phase"], string> = {
-  Sourcing: "bg-warning-soft text-warning-strong",
-  Outreach: "bg-brand-soft text-brand-strong",
-  Interviewing: "bg-success-soft text-success-strong",
-  Hired: "bg-success-soft text-success-strong",
-};
-
-const WORK_MODES = { ONSITE: "On-site", HYBRID: "Hybrid", REMOTE: "Remote" };
-
-function jobLocation({ location, remotePolicy }: DashboardJob) {
-  const parts = [location, remotePolicy && WORK_MODES[remotePolicy]];
-  return parts.filter(Boolean).join(" · ") || "Location not set";
-}
 
 type JobsTableProps = {
   jobs: DashboardJob[];

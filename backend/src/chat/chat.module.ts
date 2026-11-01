@@ -6,6 +6,8 @@ import { CampaignSetupService } from 'src/campaign-setup/campaign-setup.service'
 import { PrismaCheckpointSaver } from 'src/campaign-setup/prisma-checkpoint.saver';
 import { DashboardController } from 'src/dashboard/dashboard.controller';
 import { DashboardService } from 'src/dashboard/dashboard.service';
+import { JobsController } from 'src/jobs/jobs.controller';
+import { JobsService } from 'src/jobs/jobs.service';
 import { MeetingsController } from 'src/meetings/meetings.controller';
 import { MeetingsService } from 'src/meetings/meetings.service';
 import { DraftingService } from 'src/outreach/drafting.service';
@@ -31,6 +33,7 @@ import { PipelineService } from './pipeline.service';
   controllers: [
     ChatController,
     DashboardController,
+    JobsController,
     MeetingsController,
     OutreachController,
     RepliesController,
@@ -45,6 +48,7 @@ import { PipelineService } from './pipeline.service';
     DashboardService,
     DraftingService,
     EventsService,
+    JobsService,
     MailerService,
     MeetingsService,
     OutreachService,

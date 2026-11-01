@@ -673,7 +673,7 @@ export class AgentService {
     if (!targetId) return 'There is no job in this chat yet.';
 
     const job = await this.candidates.assertJobOwned(targetId, state.userId);
-    const progress = await this.dashboard.jobProgress(targetId, state.userId);
+    const progress = await this.dashboard.jobProgress(targetId);
     const { funnel, exits } = progress;
 
     const rate = (value: number | null) =>

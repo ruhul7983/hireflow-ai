@@ -5,7 +5,7 @@ import { ExternalLink } from "lucide-react";
 import { secondaryButton } from "@/components/chat/action-buttons";
 import { CsvUploadButton } from "@/components/chat/csv-upload-button";
 import { api, errorMessage } from "@/lib/api";
-import { statusLabel } from "@/lib/candidate-status";
+import { scoreTone, statusLabel } from "@/lib/candidate-status";
 import type { Candidate } from "@/lib/chat-types";
 
 const FILTERS = [
@@ -19,12 +19,6 @@ const FILTERS = [
 type Filter = (typeof FILTERS)[number]["key"];
 
 const REVIEWABLE = ["SOURCED", "ACCEPTED", "REJECTED"];
-
-function scoreTone(score: number) {
-  if (score >= 70) return "bg-success-soft text-success-strong";
-  if (score >= 40) return "bg-warning-soft text-warning-strong";
-  return "bg-canvas text-muted";
-}
 
 function matches(candidate: Candidate, filter: Filter) {
   if (filter === "PIPELINE") return !REVIEWABLE.includes(candidate.status);

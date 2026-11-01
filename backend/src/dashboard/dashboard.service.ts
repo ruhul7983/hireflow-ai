@@ -6,6 +6,7 @@ import {
   MeetingStatus,
   PendingActionStatus,
   PendingActionType,
+  Prisma,
   QuestionStatus,
 } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -114,10 +115,10 @@ function approvalKind(type: PendingActionType) {
 export class DashboardService {
   constructor(private readonly prisma: PrismaService) {}
 
-  private async loadHistory(userId: string) {
+  private async loadHistory(scope: Prisma.ActivityLogWhereInput) {
     const rows = await this.prisma.activityLog.findMany({
       where: {
-        job: { userId },
+        ...scope,
         candidateId: { not: null },
         toStatus: { not: null },
       },
@@ -294,11 +295,38 @@ export class DashboardService {
     };
   }
 
+  private jobSummary(candidates: TrackedCandidate[], history: History) {
+    const funnel = buildFunnel(candidates, history);
+
+    return { phase: jobPhase(funnel), funnel, ...this.rates(funnel) };
+  }
+
+  // Scoped to the jobs asked for, so listing a page doesn't read all the history
+  async summarizeJobs(jobIds: string[]) {
+    const [candidates, { history }] = await Promise.all([
+      this.prisma.candidate.findMany({
+        where: { jobId: { in: jobIds } },
+        select: { id: true, jobId: true, status: true },
+      }),
+      this.loadHistory({ jobId: { in: jobIds } }),
+    ]);
+
+    return new Map(
+      jobIds.map((id) => [
+        id,
+        this.jobSummary(
+          candidates.filter(({ jobId }) => jobId === id),
+          history,
+        ),
+      ]),
+    );
+  }
+
   async overview(userId: string) {
     const [jobs, { rows, history }, replyOutcomes, approvals, activity] =
       await Promise.all([
         this.loadJobs(userId),
-        this.loadHistory(userId),
+        this.loadHistory({ job: { userId } }),
         this.replyOutcomes(userId),
         this.approvals(userId),
         this.recentActivity(userId),
@@ -325,32 +353,26 @@ export class DashboardService {
       replyOutcomes,
       approvals,
       activity,
-      jobs: jobs.map((job) => {
-        const jobFunnel = buildFunnel(job.candidates, history);
-
-        return {
-          id: job.id,
-          title: job.title,
-          location: job.location,
-          remotePolicy: job.remotePolicy,
-          conversationId: job.conversations[0]?.id ?? null,
-          phase: jobPhase(jobFunnel),
-          funnel: jobFunnel,
-          ...this.rates(jobFunnel),
-        };
-      }),
+      jobs: jobs.map((job) => ({
+        id: job.id,
+        title: job.title,
+        location: job.location,
+        remotePolicy: job.remotePolicy,
+        conversationId: job.conversations[0]?.id ?? null,
+        ...this.jobSummary(job.candidates, history),
+      })),
     };
   }
 
   // The same numbers as the dashboard, so the AI and the page can't disagree
-  async jobProgress(jobId: string, userId: string) {
+  async jobProgress(jobId: string) {
     const [candidates, { history }, upcomingMeetings, waiting] =
       await Promise.all([
         this.prisma.candidate.findMany({
           where: { jobId },
           select: { id: true, status: true },
         }),
-        this.loadHistory(userId),
+        this.loadHistory({ jobId }),
         this.prisma.meeting.count({
           where: {
             status: MeetingStatus.BOOKED,

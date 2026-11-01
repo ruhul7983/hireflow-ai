@@ -3,6 +3,10 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { ActivityFeed } from "@/components/dashboard/activity-feed";
 import { Approvals } from "@/components/dashboard/approvals";
+import {
+  DashboardSkeleton,
+  WelcomeSkeleton,
+} from "@/components/dashboard/dashboard-skeleton";
 import { FunnelChart } from "@/components/dashboard/funnel-chart";
 import { JobsTable } from "@/components/dashboard/jobs-table";
 import { OutreachChart } from "@/components/dashboard/outreach-chart";
@@ -77,7 +81,7 @@ export default function Home() {
   return (
     <main className="w-full space-y-4 px-4 py-6 sm:px-6 lg:px-8">
       <header>
-        <Suspense fallback={<div className="h-9" />}>
+        <Suspense fallback={<WelcomeSkeleton />}>
           <Welcome />
         </Suspense>
         <p className="mt-0.5 text-muted">
@@ -85,7 +89,7 @@ export default function Home() {
         </p>
       </header>
 
-      <Suspense fallback={<p className="text-sm text-muted">Loading your numbers…</p>}>
+      <Suspense fallback={<DashboardSkeleton />}>
         <DashboardContent />
       </Suspense>
     </main>

@@ -17,10 +17,12 @@ import {
   EmailStatus,
   MessageRole,
   PendingActionType,
+  Prisma,
 } from '@prisma/client';
 import { Job as QueueJob, Queue, Worker } from 'bullmq';
 import { ChatService } from 'src/chat/chat.service';
 import { EventsService } from 'src/chat/events.service';
+import { containsText, JobPageQueryDto, paginate } from 'src/common/pagination';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { queueOptions } from 'src/queue/redis-options';
 import { DraftingService } from './drafting.service';
@@ -586,6 +588,79 @@ export class OutreachService implements OnModuleInit, OnModuleDestroy {
       throw new NotFoundException('Campaign not found');
     }
     return campaign;
+  }
+
+  async listCampaigns(
+    userId: string,
+    query: JobPageQueryDto & { status?: CampaignStatus },
+  ) {
+    const { search, status, jobId } = query;
+    const text = search ? containsText(search) : undefined;
+
+    const where: Prisma.CampaignWhereInput = {
+      job: { userId },
+      jobId,
+      status,
+      ...(text && { OR: [{ name: text }, { job: { title: text } }] }),
+    };
+
+    const page = await paginate(
+      query,
+      await this.prisma.campaign.count({ where }),
+      (range) =>
+        this.prisma.campaign.findMany({
+          ...range,
+          where,
+          orderBy: [{ createdAt: 'desc' }, { id: 'asc' }],
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            dailyLimit: true,
+            conversationId: true,
+            createdAt: true,
+            job: { select: { id: true, title: true } },
+            steps: { select: { id: true } },
+            _count: { select: { recipients: true } },
+          },
+        }),
+    );
+
+    // Grouped in one query, so a page never loads every email it's counting
+    const counts = await this.prisma.outboundEmail.groupBy({
+      by: ['campaignStepId', 'status'],
+      where: {
+        campaignStepId: {
+          in: page.items.flatMap(({ steps }) => steps.map(({ id }) => id)),
+        },
+      },
+      _count: true,
+    });
+
+    return {
+      ...page,
+      items: page.items.map(({ steps, _count, ...campaign }) => {
+        const stepIds = new Set(steps.map(({ id }) => id));
+        const rows = counts.filter(({ campaignStepId }) =>
+          stepIds.has(campaignStepId),
+        );
+        const countOf = (wanted?: EmailStatus) =>
+          rows
+            .filter(({ status }) => !wanted || status === wanted)
+            .reduce((total, row) => total + row._count, 0);
+
+        return {
+          ...campaign,
+          recipients: _count.recipients,
+          emails: {
+            total: countOf(),
+            sent: countOf(EmailStatus.SENT),
+            failed: countOf(EmailStatus.FAILED),
+            stopped: countOf(EmailStatus.STOPPED),
+          },
+        };
+      }),
+    };
   }
 
   async getCampaign(campaignId: string, userId: string) {

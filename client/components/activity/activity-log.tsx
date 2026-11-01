@@ -1,13 +1,10 @@
-"use client";
-
-import { useEffect, useState } from "react";
 import { Bot, Cog, UserRound } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { api, errorMessage } from "@/lib/api";
+import { LocalTime } from "@/components/list/local-time";
 import { statusLabel } from "@/lib/candidate-status";
 import type { ActivityEntry } from "@/lib/chat-types";
 
-const ACTORS: Record<
+export const ACTORS: Record<
   ActivityEntry["actor"],
   { label: string; icon: LucideIcon; tone: string }
 > = {
@@ -20,41 +17,7 @@ const ACTORS: Record<
   SYSTEM: { label: "System", icon: Cog, tone: "bg-canvas text-muted" },
 };
 
-function timeLabel(value: string) {
-  return new Date(value).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
-
-export function ActivityLog() {
-  const [entries, setEntries] = useState<ActivityEntry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let active = true;
-
-    api<ActivityEntry[]>("/activity")
-      .then((loaded) => {
-        if (active) setEntries(loaded);
-      })
-      .catch((cause) => {
-        if (active) setError(errorMessage(cause));
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  if (!entries) {
-    return <p className="text-sm text-muted">{error ?? "Loading activity…"}</p>;
-  }
-
-  if (entries.length === 0) {
-    return <p className="text-sm text-muted">Nothing has happened yet.</p>;
-  }
-
+export function ActivityLog({ entries }: { entries: ActivityEntry[] }) {
   return (
     <ol className="divide-y divide-line rounded-xl border border-line">
       {entries.map((entry) => {
@@ -79,12 +42,9 @@ export function ActivityLog() {
                 )}
               </p>
             </div>
-            <time
-              dateTime={entry.createdAt}
-              className="shrink-0 text-xs whitespace-nowrap text-muted"
-            >
-              {timeLabel(entry.createdAt)}
-            </time>
+            <span className="shrink-0 text-xs text-muted">
+              <LocalTime value={entry.createdAt} />
+            </span>
           </li>
         );
       })}

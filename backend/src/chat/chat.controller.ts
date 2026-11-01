@@ -13,6 +13,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Sse,
   UploadedFile,
   UseGuards,
@@ -31,7 +32,9 @@ import { AgentService } from './agent.service';
 import { CandidatesService } from './candidates.service';
 import { ChatService } from './chat.service';
 import {
+  ActivityQueryDto,
   AnswerQuestionDto,
+  CandidateQueryDto,
   DecideCandidateDto,
   SendMessageDto,
   UpdateCandidateStatusDto,
@@ -223,9 +226,20 @@ export class ChatController {
     return { success: true };
   }
 
+  @Get('candidates')
+  searchCandidates(
+    @GetUser('id') userId: string,
+    @Query() query: CandidateQueryDto,
+  ) {
+    return this.candidates.search(userId, query);
+  }
+
   @Get('activity')
-  listActivity(@GetUser('id') userId: string) {
-    return this.candidates.activity(userId);
+  listActivity(
+    @GetUser('id') userId: string,
+    @Query() query: ActivityQueryDto,
+  ) {
+    return this.candidates.activity(userId, query);
   }
 
   // Reads the file so the recruiter can match its columns. Nothing is saved here.

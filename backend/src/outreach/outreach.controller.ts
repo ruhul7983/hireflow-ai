@@ -9,12 +9,27 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
-import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import { CampaignStatus } from '@prisma/client';
+import {
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
 import { DatabaseAuthGuard } from 'src/auth/guards/database-auth.guard';
+import { JobPageQueryDto } from 'src/common/pagination';
 import { OutreachService } from './outreach.service';
+
+export class CampaignQueryDto extends JobPageQueryDto {
+  @IsOptional()
+  @IsEnum(CampaignStatus, { message: 'That status is not valid' })
+  status?: CampaignStatus;
+}
 
 class UpdateEmailDraftDto {
   @IsOptional()
@@ -34,6 +49,11 @@ class UpdateEmailDraftDto {
 @UseGuards(DatabaseAuthGuard)
 export class OutreachController {
   constructor(private readonly outreach: OutreachService) {}
+
+  @Get()
+  list(@GetUser('id') userId: string, @Query() query: CampaignQueryDto) {
+    return this.outreach.listCampaigns(userId, query);
+  }
 
   @Get(':id')
   async getCampaign(
