@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { CampaignToggle } from "@/components/campaigns/campaign-toggle";
+import { CampaignStop, CampaignToggle } from "@/components/campaigns/campaign-toggle";
 import {
   DataTable,
   numericCell,
@@ -42,6 +42,7 @@ export function CampaignsTable({ campaigns }: { campaigns: CampaignRow[] }) {
         const { total, sent } = campaign.emails;
         const canToggle =
           campaign.status === "SENDING" || campaign.status === "PAUSED";
+        const canStop = canToggle || campaign.status === "DRAFT";
 
         return (
           <tr key={campaign.id} className={tableRow}>
@@ -76,6 +77,7 @@ export function CampaignsTable({ campaigns }: { campaigns: CampaignRow[] }) {
             <td className={tableCell}>
               <div className="flex items-center gap-3">
                 {canToggle && <CampaignToggle campaign={campaign} />}
+                {canStop && <CampaignStop campaign={campaign} />}
                 <Link
                   href={`/chat?c=${campaign.conversationId}`}
                   className={`whitespace-nowrap ${tableLink}`}

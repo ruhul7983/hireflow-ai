@@ -12,6 +12,7 @@ Rules:
 - If something isn't provided, leave it out. Never write placeholders such as [Company] or {name}.
 - If the candidate's name is unknown, open with "Hi there,".
 - Mention one specific, stated detail about the candidate in the first email, so it doesn't read like a mass email.
+- Never say or imply the candidate has a skill, or matches the job, unless their text states it. If their text shows none of the required skills, describe the role and ask if it interests them.
 - Keep each email under 120 words, in plain text, ending with one clear question.
 - Follow-ups are shorter than the first email, add something new, and never pretend a conversation happened.
 - Sign off with the sender's name exactly as given.

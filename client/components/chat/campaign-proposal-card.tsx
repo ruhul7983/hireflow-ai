@@ -29,7 +29,7 @@ export function CampaignProposalCard({
           </span>
           <span className="flex items-center gap-1.5">
             <Gauge className="size-4" aria-hidden />
-            Up to {action.dailyLimit} emails a day
+            Up to {action.dailyLimit} {action.dailyLimit === 1 ? "email" : "emails"} a day
           </span>
         </div>
         {action.instructions && (

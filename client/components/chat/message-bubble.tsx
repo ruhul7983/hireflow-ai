@@ -4,6 +4,7 @@ import { CampaignDraftsCard } from "@/components/chat/campaign-drafts-card";
 import { CampaignProgressCard } from "@/components/chat/campaign-progress-card";
 import { CampaignProposalCard } from "@/components/chat/campaign-proposal-card";
 import { CandidateTableCard } from "@/components/chat/candidate-table-card";
+import { ConfirmationCard } from "@/components/chat/confirmation-card";
 import { DecisionCard } from "@/components/chat/decision-card";
 import { JobCreatedCard } from "@/components/chat/job-created-card";
 import { JobDraftCard } from "@/components/chat/job-draft-card";
@@ -78,6 +79,9 @@ function Card({ message, conversationId, refreshKey, onChanged }: MessageBubbleP
   }
   if (cardType === "CAMPAIGN_CHANGE" && pendingAction) {
     return <CampaignChangeCard action={pendingAction} onChanged={onChanged} />;
+  }
+  if (cardType === "CONFIRMATION" && pendingAction) {
+    return <ConfirmationCard action={pendingAction} onChanged={onChanged} />;
   }
   if (cardType === "CAMPAIGN_DRAFTS" && campaignId) {
     return (

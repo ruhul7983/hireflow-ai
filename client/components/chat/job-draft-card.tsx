@@ -182,7 +182,7 @@ export function JobDraftCard({ draft, action, onChanged }: JobDraftCardProps) {
         {isOpen ? (
           <ActionButtons
             actionId={action.id}
-            confirmLabel="Create job"
+            confirmLabel={action.type === "UPDATE_JOB" ? "Save changes" : "Create job"}
             disabled={!fields.title?.trim()}
             beforeConfirm={async () => {
               await save({
@@ -195,7 +195,11 @@ export function JobDraftCard({ draft, action, onChanged }: JobDraftCardProps) {
             onChanged={onChanged}
           />
         ) : (
-          <p className="text-sm text-muted">{STATUS_NOTES[action.status]}</p>
+          <p className="text-sm text-muted">
+            {action.type === "UPDATE_JOB" && action.status === "EXECUTED"
+              ? "Job updated."
+              : STATUS_NOTES[action.status]}
+          </p>
         )}
       </div>
     </div>

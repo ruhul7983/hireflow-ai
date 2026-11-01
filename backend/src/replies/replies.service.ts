@@ -33,11 +33,13 @@ import { OutreachService } from 'src/outreach/outreach.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { queueOptions } from 'src/queue/redis-options';
 import { isSafeToAutoSend } from './auto-reply';
+import { InboxService } from './inbox.service';
 import { ReplyReaderService } from './reply-reader.service';
 import type { ReplyReading } from './reply-reader.service';
 
 const QUEUE_NAME = 'replies';
 const DAY_MS = 24 * 60 * 60 * 1000;
+const INBOX_CHECK_MS = 60_000;
 const MAX_AUTO_REPLIES_PER_DAY = 20;
 
 const JOB_OPTIONS = {
@@ -75,7 +77,7 @@ const CARD_MESSAGES: Record<ReplyClassification, string> = {
     "They asked not to be contacted. I've stopped all outreach to them, and nothing will be sent.",
 };
 
-type ReplyPayload = { replyId: string };
+type ReplyPayload = { replyId?: string };
 
 function replySubject(subject: string | undefined, jobTitle: string) {
   const original = subject ?? jobTitle;
@@ -96,21 +98,19 @@ export class RepliesService implements OnModuleInit, OnModuleDestroy {
     private readonly mailer: MailerService,
     private readonly outreach: OutreachService,
     private readonly reader: ReplyReaderService,
+    private readonly inbox: InboxService,
     private readonly candidates: CandidatesService,
     private readonly meetings: MeetingsService,
     private readonly configService: ConfigService,
   ) {}
 
-  onModuleInit() {
+  async onModuleInit() {
     const options = queueOptions(this.configService);
 
     this.queue = new Queue(QUEUE_NAME, options);
     this.worker = new Worker<ReplyPayload>(
       QUEUE_NAME,
-      (job) =>
-        job.name === 'send'
-          ? this.sendDraft(job.data.replyId)
-          : this.readReply(job.data.replyId),
+      (job) => this.process(job),
       options,
     );
 
@@ -122,6 +122,38 @@ export class RepliesService implements OnModuleInit, OnModuleDestroy {
       this.lastWorkerError = error.message;
       this.logger.error(error.message);
     });
+
+    if (this.inbox.enabled) {
+      await this.queue.upsertJobScheduler(
+        'inbox',
+        { every: INBOX_CHECK_MS },
+        { name: 'inbox', opts: { removeOnComplete: true, removeOnFail: true } },
+      );
+    } else {
+      await this.queue.removeJobScheduler('inbox');
+    }
+  }
+
+  private process(job: QueueJob<ReplyPayload>) {
+    switch (job.name) {
+      case 'inbox':
+        return this.checkInbox();
+      case 'send':
+        return this.sendDraft(job.data.replyId ?? '');
+      default:
+        return this.readReply(job.data.replyId ?? '');
+    }
+  }
+
+  // One bad email shouldn't hold up the others, and a retry finds it again
+  private async checkInbox() {
+    for (const { candidateId, userId, body, messageId } of await this.inbox.newReplies()) {
+      try {
+        await this.receive(candidateId, userId, body, messageId);
+      } catch (error) {
+        this.logger.warn(`Skipped an inbox reply: ${(error as Error).message}`);
+      }
+    }
   }
 
   async onModuleDestroy() {
@@ -130,7 +162,12 @@ export class RepliesService implements OnModuleInit, OnModuleDestroy {
   }
 
   // Everything that must not wait for the AI happens here, before any model call
-  async receive(candidateId: string, userId: string, body: string) {
+  async receive(
+    candidateId: string,
+    userId: string,
+    body: string,
+    inboundMessageId?: string,
+  ) {
     const candidate = await this.prisma.candidate.findFirst({
       where: { id: candidateId, job: { userId } },
     });
@@ -159,6 +196,7 @@ export class RepliesService implements OnModuleInit, OnModuleDestroy {
         conversationId,
         outboundEmailId: lastEmail.id,
         body,
+        inboundMessageId,
       },
     });
 
@@ -443,7 +481,7 @@ export class RepliesService implements OnModuleInit, OnModuleDestroy {
     this.logger.error(`Reply job failed: ${error.message}`);
 
     // Earlier attempts will retry, so only the last failure is recorded
-    if (!job || job.attemptsMade < (job.opts.attempts ?? 1)) return;
+    if (!job?.data.replyId || job.attemptsMade < (job.opts.attempts ?? 1)) return;
 
     const isSend = job.name === 'send';
     const reply = await this.prisma.candidateReply.update({

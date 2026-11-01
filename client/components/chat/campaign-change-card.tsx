@@ -9,6 +9,7 @@ const STATUS_NOTES: Record<PendingAction["status"], string> = {
 };
 
 const CHANGE_LABELS = {
+  SEND: "Approve and send",
   PAUSE: "Pause campaign",
   RESUME: "Resume campaign",
   STOP: "Stop campaign",
@@ -32,7 +33,7 @@ export function CampaignChangeCard({
         <p className="font-semibold">{action.campaignName}</p>
         {dailyLimit && campaignChange !== "STOP" && (
           <p className="mt-1 text-sm text-muted">
-            New limit: up to {dailyLimit} emails a day
+            New limit: up to {dailyLimit} {dailyLimit === 1 ? "email" : "emails"} a day
           </p>
         )}
       </div>

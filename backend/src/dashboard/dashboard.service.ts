@@ -100,12 +100,15 @@ function jobPhase(funnel: Funnel) {
 function approvalKind(type: PendingActionType) {
   switch (type) {
     case PendingActionType.SEND_REPLY:
+    case PendingActionType.APPROVE_REPLY:
       return 'reply';
     case PendingActionType.CREATE_CAMPAIGN:
     case PendingActionType.SEND_CAMPAIGN:
     case PendingActionType.CHANGE_CAMPAIGN:
       return 'campaign';
     case PendingActionType.CREATE_JOB:
+    case PendingActionType.UPDATE_JOB:
+    case PendingActionType.CHANGE_AUTO_REPLY:
       return 'job';
     default:
       return 'candidates';
@@ -209,7 +212,7 @@ export class DashboardService {
     }));
   }
 
-  private async approvals(userId: string) {
+  async approvals(userId: string) {
     const [actions, questions] = await Promise.all([
       this.prisma.pendingAction.findMany({
         where: {
@@ -251,6 +254,12 @@ export class DashboardService {
           return `Approve drafts for ${action.campaign?.name ?? 'a campaign'}`;
         case PendingActionType.CHANGE_CAMPAIGN:
           return `Confirm a change to ${action.campaignName}`;
+        case PendingActionType.UPDATE_JOB:
+          return `Confirm changes to ${action.job?.title ?? 'a job'}`;
+        case PendingActionType.APPROVE_REPLY:
+        case PendingActionType.RETRY_SCORING:
+        case PendingActionType.CHANGE_AUTO_REPLY:
+          return action.title ?? 'Confirm a change';
         case PendingActionType.SEND_REPLY:
           return `Reply to ${action.reply?.candidate.name ?? 'a candidate'}`;
         default:

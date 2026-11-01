@@ -66,12 +66,18 @@ export const CHANGEABLE_STATUSES: CampaignStatus[] = [
 ];
 
 export const CHANGE_NEEDS_STATUS: Record<CampaignChange, CampaignStatus[]> = {
+  SEND: [CampaignStatus.DRAFT],
   PAUSE: [CampaignStatus.SENDING],
   RESUME: [CampaignStatus.PAUSED],
   STOP: CHANGEABLE_STATUSES,
 };
 
+function emailCount(count: number) {
+  return `${count} ${count === 1 ? 'email' : 'emails'}`;
+}
+
 const CHANGE_LABELS: Record<CampaignChange, string> = {
+  SEND: 'Approved',
   PAUSE: 'Paused',
   RESUME: 'Resumed',
   STOP: 'Stopped',
@@ -351,7 +357,7 @@ export class OutreachService implements OnModuleInit, OnModuleDestroy {
 
     await this.chat.appendMessage(campaign.conversationId, {
       role: MessageRole.ASSISTANT,
-      content: `Approved. Sending has started, with a limit of ${campaign.dailyLimit} emails a day.`,
+      content: `Approved. Sending has started, with a limit of ${emailCount(campaign.dailyLimit)} a day.`,
       cardType: CardType.CAMPAIGN_PROGRESS,
       campaignId,
     });
@@ -581,8 +587,8 @@ export class OutreachService implements OnModuleInit, OnModuleDestroy {
       role: MessageRole.ASSISTANT,
       content:
         details.length > 0
-          ? `${campaign.name} finished. ${sent} emails were sent, ${details.join(', and ')}.`
-          : `${campaign.name} finished. All ${sent} emails were sent.`,
+          ? `${campaign.name} finished. Sent ${emailCount(sent)}, ${details.join(', and ')}.`
+          : `${campaign.name} finished. Sent ${emailCount(sent)}.`,
     });
   }
 
@@ -812,6 +818,23 @@ export class OutreachService implements OnModuleInit, OnModuleDestroy {
     dailyLimit: number | null,
   ) {
     const campaign = await this.findOwned(campaignId, userId);
+
+    // Approving logs and announces itself, and also answers the review card
+    if (change === CampaignChange.SEND) {
+      await this.approve(campaignId);
+      await this.prisma.pendingAction.updateMany({
+        where: {
+          campaignId,
+          type: PendingActionType.SEND_CAMPAIGN,
+          status: PendingActionStatus.PENDING,
+        },
+        data: {
+          status: PendingActionStatus.EXECUTED,
+          resolvedAt: new Date(),
+        },
+      });
+      return null;
+    }
 
     if (change === CampaignChange.STOP) {
       await this.stopCampaign(campaignId);

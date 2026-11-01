@@ -14,6 +14,7 @@ import { DraftingService } from 'src/outreach/drafting.service';
 import { MailerService } from 'src/outreach/mailer.service';
 import { OutreachController } from 'src/outreach/outreach.controller';
 import { OutreachService } from 'src/outreach/outreach.service';
+import { InboxService } from 'src/replies/inbox.service';
 import { RepliesController } from 'src/replies/replies.controller';
 import { RepliesService } from 'src/replies/replies.service';
 import { ReplyReaderService } from 'src/replies/reply-reader.service';
@@ -50,6 +51,7 @@ import { PipelineService } from './pipeline.service';
     DashboardService,
     DraftingService,
     EventsService,
+    InboxService,
     JobsService,
     MailerService,
     MeetingsService,

@@ -18,6 +18,7 @@ import {
   PendingActionType,
   RemotePolicy,
 } from '@prisma/client';
+import { JobsService } from 'src/jobs/jobs.service';
 import { OutreachService } from 'src/outreach/outreach.service';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { RepliesService } from 'src/replies/replies.service';
@@ -56,6 +57,7 @@ export type CampaignProposal = {
 };
 
 const CHANGE_NOTES: Record<CampaignChange, string> = {
+  SEND: 'approve the drafts and start sending',
   PAUSE: 'pause it. Nothing more goes out until you resume it',
   RESUME: 'resume it',
   STOP: 'stop it for good. Emails not sent yet are cancelled',
@@ -77,6 +79,7 @@ export class ActionsService {
     private readonly outreach: OutreachService,
     private readonly replies: RepliesService,
     private readonly pipeline: PipelineService,
+    private readonly jobs: JobsService,
   ) {}
 
   // Reply drafts are left out because several can wait at once, each to a different
@@ -237,6 +240,116 @@ export class ActionsService {
     };
   }
 
+  async proposeReplySend(
+    conversationId: string,
+    reply: { id: string; jobId: string; candidateName: string | null },
+    draft: string,
+  ): Promise<ProposedCard> {
+    await this.supersede(conversationId, PendingActionType.APPROVE_REPLY);
+
+    const name = reply.candidateName ?? 'this candidate';
+    const action = await this.prisma.pendingAction.create({
+      data: {
+        conversationId,
+        type: PendingActionType.APPROVE_REPLY,
+        jobId: reply.jobId,
+        replyId: reply.id,
+        title: `Reply to ${name}`,
+        detail: draft,
+        confirmLabel: 'Send reply',
+      },
+    });
+
+    return {
+      content: `Please check this reply to ${name} before it goes out.`,
+      cardType: CardType.CONFIRMATION,
+      pendingActionId: action.id,
+      jobId: reply.jobId,
+    };
+  }
+
+  async proposeScoring(
+    conversationId: string,
+    jobId: string,
+    count: number,
+  ): Promise<ProposedCard> {
+    await this.supersede(conversationId, PendingActionType.RETRY_SCORING);
+
+    const action = await this.prisma.pendingAction.create({
+      data: {
+        conversationId,
+        type: PendingActionType.RETRY_SCORING,
+        jobId,
+        title: `Score ${candidateCount(count)}`,
+        confirmLabel: 'Start scoring',
+      },
+    });
+
+    return {
+      content: `${candidateCount(count)} still need a score. Should I score them now?`,
+      cardType: CardType.CONFIRMATION,
+      pendingActionId: action.id,
+      jobId,
+    };
+  }
+
+  async proposeAutoReplyChange(
+    conversationId: string,
+    job: { id: string; title: string },
+    enabled: boolean,
+  ): Promise<ProposedCard> {
+    await this.supersede(conversationId, PendingActionType.CHANGE_AUTO_REPLY);
+
+    const action = await this.prisma.pendingAction.create({
+      data: {
+        conversationId,
+        type: PendingActionType.CHANGE_AUTO_REPLY,
+        jobId: job.id,
+        enabled,
+        title: `Turn auto-reply ${enabled ? 'on' : 'off'} for ${job.title}`,
+        detail: enabled
+          ? 'The AI will answer simple replies without asking you first. Questions, and anything with a link, a figure or a price, still wait for you. It replies once per candidate, and up to 20 times a day.'
+          : 'Every reply will wait for your approval.',
+        confirmLabel: enabled ? 'Turn on' : 'Turn off',
+      },
+    });
+
+    return {
+      content: `Please confirm you want auto-reply ${enabled ? 'on' : 'off'}.`,
+      cardType: CardType.CONFIRMATION,
+      pendingActionId: action.id,
+      jobId: job.id,
+    };
+  }
+
+  // A draft holds the new values, so the recruiter gets the same editable card as for a new job
+  async proposeJobUpdate(
+    conversationId: string,
+    jobId: string,
+    fields: JobDraftFields,
+  ): Promise<ProposedCard> {
+    await this.supersede(conversationId, PendingActionType.UPDATE_JOB);
+
+    const draft = await this.prisma.jobDraft.create({
+      data: { ...fields, conversationId },
+    });
+    const action = await this.prisma.pendingAction.create({
+      data: {
+        conversationId,
+        type: PendingActionType.UPDATE_JOB,
+        jobId,
+        jobDraftId: draft.id,
+      },
+    });
+
+    return {
+      content: 'Here is the job with your changes. Edit anything, then save.',
+      cardType: CardType.JOB_DRAFT,
+      pendingActionId: action.id,
+      jobDraftId: draft.id,
+    };
+  }
+
   async proposeCampaign(
     conversationId: string,
     jobId: string,
@@ -294,7 +407,11 @@ export class ActionsService {
   async confirm(actionId: string, userId: string) {
     const action = await this.findOwned(actionId, userId);
 
-    if (action.type === PendingActionType.CREATE_JOB && !action.jobDraft?.title?.trim()) {
+    const needsTitle: PendingActionType[] = [
+      PendingActionType.CREATE_JOB,
+      PendingActionType.UPDATE_JOB,
+    ];
+    if (needsTitle.includes(action.type) && !action.jobDraft?.title?.trim()) {
       throw new BadRequestException('Add a job title before confirming');
     }
 
@@ -323,7 +440,7 @@ export class ActionsService {
     if (action.campaignId && action.type === PendingActionType.SEND_CAMPAIGN) {
       await this.outreach.discard(action.campaignId);
     }
-    if (action.replyId) {
+    if (action.replyId && action.type === PendingActionType.SEND_REPLY) {
       await this.replies.discard(action.replyId);
     }
 
@@ -353,6 +470,14 @@ export class ActionsService {
         return this.outreach.approve(action.campaignId);
       case PendingActionType.CHANGE_CAMPAIGN:
         return this.changeCampaign(action, userId);
+      case PendingActionType.APPROVE_REPLY:
+        return this.approveReply(action, userId);
+      case PendingActionType.RETRY_SCORING:
+        return this.retryScoring(action);
+      case PendingActionType.UPDATE_JOB:
+        return this.updateJob(action);
+      case PendingActionType.CHANGE_AUTO_REPLY:
+        return this.changeAutoReply(action, userId);
       case PendingActionType.SEND_REPLY:
         if (!action.replyId) throw new Error('The reply no longer exists');
         return this.replies.approve(action.replyId);
@@ -468,9 +593,101 @@ export class ActionsService {
       action.dailyLimit,
     );
 
+    if (!summary) return;
+
     await this.chat.appendMessage(action.conversationId, {
       role: MessageRole.ASSISTANT,
       content: `Done. ${summary}.`,
+    });
+  }
+
+  private async approveReply(
+    action: Awaited<ReturnType<ActionsService['findOwned']>>,
+    userId: string,
+  ) {
+    if (!action.replyId || !action.detail) {
+      throw new Error('The reply no longer exists');
+    }
+
+    await this.replies.updateDraft(action.replyId, userId, action.detail);
+    await this.replies.approve(action.replyId);
+
+    // Closes the buttons on the reply's own card
+    await this.prisma.pendingAction.updateMany({
+      where: {
+        replyId: action.replyId,
+        type: PendingActionType.SEND_REPLY,
+        status: PendingActionStatus.PENDING,
+      },
+      data: { status: PendingActionStatus.EXECUTED, resolvedAt: new Date() },
+    });
+
+    await this.chat.appendMessage(action.conversationId, {
+      role: MessageRole.ASSISTANT,
+      content: 'Approved. The reply is on its way.',
+    });
+  }
+
+  private async retryScoring(
+    action: Awaited<ReturnType<ActionsService['findOwned']>>,
+  ) {
+    if (!action.jobId) throw new Error('The job no longer exists');
+
+    await this.sourcing.retryScoring(action.jobId);
+    await this.chat.appendMessage(action.conversationId, {
+      role: MessageRole.ASSISTANT,
+      content: 'Scoring has started. I will post the results here.',
+    });
+  }
+
+  private async updateJob(
+    action: Awaited<ReturnType<ActionsService['findOwned']>>,
+  ) {
+    const draft = action.jobDraft;
+    if (!action.jobId || !draft?.title) {
+      throw new Error('The job details are incomplete');
+    }
+
+    const job = await this.prisma.job.update({
+      where: { id: action.jobId },
+      data: {
+        title: draft.title,
+        seniority: draft.seniority,
+        location: draft.location,
+        salary: draft.salary,
+        remotePolicy: draft.remotePolicy,
+        mustHaveSkills: draft.mustHaveSkills,
+        niceToHaveSkills: draft.niceToHaveSkills,
+      },
+    });
+
+    await this.prisma.activityLog.create({
+      data: {
+        jobId: job.id,
+        actor: ActivityActor.RECRUITER,
+        type: ActivityType.JOB_UPDATED,
+        summary: `Updated ${job.title}`,
+      },
+    });
+
+    await this.chat.appendMessage(action.conversationId, {
+      role: MessageRole.ASSISTANT,
+      content: `Done. ${job.title} is updated. Candidates already scored keep their scores.`,
+    });
+  }
+
+  private async changeAutoReply(
+    action: Awaited<ReturnType<ActionsService['findOwned']>>,
+    userId: string,
+  ) {
+    if (!action.jobId || action.enabled === null) {
+      throw new Error('The setting is incomplete');
+    }
+
+    await this.jobs.setAutoReply(action.jobId, userId, action.enabled);
+    await this.chat.appendMessage(action.conversationId, {
+      role: MessageRole.ASSISTANT,
+      content: `Done. Auto-reply is ${action.enabled ? 'on' : 'off'} for this job.`,
     });
   }
 

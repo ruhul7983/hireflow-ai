@@ -51,7 +51,7 @@ Sample data is in `prisma/sample-data/`.
 2. Run a web search, or upload `sample-candidates.csv`. It includes a duplicate and a row with no contact details, to show both being handled.
 3. Say "accept the top 3", then "set up outreach".
 4. Approve the drafts. Set `OUTREACH_DAY_SECONDS=20` to see follow-ups go out in seconds.
-5. Use **Simulate reply** on a sent email, then approve the drafted response.
+5. Reply to the email from the candidate's inbox, or use **Simulate reply** on a sent email. Then approve the drafted response.
 6. If the reply asked for a meeting, open the booking link and pick a time.
 7. Say "mark Ayesha as interviewed", then shortlisted, then hired, or use the status control on the Candidates page.
 8. Ask "how is the job going?", and open the dashboard.
@@ -90,15 +90,15 @@ Tool names are snake_case `verb_noun`, and the verb says what a tool may do:
 
 | Prefix | Meaning | Tools |
 | --- | --- | --- |
-| `read_`, `list_`, `get_` | Only look at data | `read_job_posting`, `list_jobs`, `list_candidates`, `list_campaigns`, `get_job_stats` |
-| `propose_` | Only show a card to confirm | `propose_job`, `propose_sourcing`, `propose_candidate_decision`, `propose_candidate_status_change`, `propose_campaign_change` |
+| `read_`, `list_`, `get_` | Only look at data | `read_job_posting`, `list_jobs`, `list_candidates`, `list_campaigns`, `list_replies`, `list_meetings`, `list_activity`, `list_pending_approvals`, `get_job_stats`, `get_job_details`, `get_candidate_details`, `get_campaign_details` |
+| `propose_` | Only show a card to confirm | `propose_job`, `propose_job_update`, `propose_sourcing`, `propose_candidate_scoring`, `propose_candidate_decision`, `propose_candidate_status_change`, `propose_campaign_send`, `propose_campaign_change`, `propose_reply_send`, `propose_auto_reply_change` |
 | `start_` | Hand over to a guided flow | `start_campaign_setup` |
 
-**Confirmation is enforced in code, not in the prompt.** A write tool never writes. It creates a `PendingAction` row and shows a card, and only `ActionsService.confirm` runs the action. A chat "yes" or "no" is decided by a regular expression before the model is called, so nothing inside a job post or a candidate profile can talk the model into approving something.
+**Confirmation is enforced in code, not in the prompt.** A write tool never writes. It creates a `PendingAction` row and shows a card, and only `ActionsService.confirm` runs the action. A chat "yes" or "no" is decided by a regular expression before the model is called, so nothing inside a job post or a candidate profile can talk the model into approving something. It only accepts plain answers, so "ok but change the salary" goes to the model instead of confirming a card.
 
 **Campaigns can be controlled from chat.** `propose_campaign_change` can pause, resume or stop a campaign and change its daily limit, in one confirmed step such as "resume at 50 a day".
 
-**Sending has no agent tool on purpose.** Campaigns are approved on the review card or with a chat "yes" to that card. Reply drafts are only approved on their own card, because each one is a specific email to a specific person.
+**Sending always needs a named card.** `propose_campaign_send` and `propose_reply_send` show exactly what will go out and to whom. A reply's own card isn't answered by a chat "yes", because several can be open at once and "yes" could send the wrong one.
 
 **Campaign setup is a LangGraph graph.** It pauses with `interrupt()` on each question and shows button suggestions, then continues with `Command({ resume })`. Checkpoints live in Postgres as bytes through a custom saver, because the official saver needs JSONB. A paused setup survives a server restart.
 
@@ -109,6 +109,7 @@ All heavy work runs in BullMQ with three attempts and exponential backoff.
 - **Sourcing** searches with Serper (`site:linkedin.com/in`), never scraping LinkedIn itself. It removes duplicates by email or profile URL, then scores in batches of 8. Retries only pick up unscored rows, so nothing is paid for twice.
 - **Outreach** has a scheduler that runs every 5 seconds and queues whatever is due within the daily limit. Each send claims its row atomically. A unique constraint on step and candidate means nobody can receive the same step twice.
 - **Replies** first stop follow-ups, before any model call. Then the reply is classified, the status is updated and a response is drafted.
+- **Inbox** checks Gmail every minute over IMAP. It only opens emails that answer one of our own messages, from the address that message was sent to. It leaves the rest of the mailbox unread and unopened, and never handles one email twice.
 
 Progress reaches the chat over SSE. Events go through Redis pub/sub, so they work across processes.
 
@@ -147,13 +148,12 @@ Anything else waits for approval as usual.
 
 | Service | Mock |
 | --- | --- |
-| Candidate inbox | `POST /simulate-reply` and a UI button. It is the same path a mail webhook would use. |
+| Candidate inbox | Real Gmail through IMAP when an account is set. Without one, `POST /simulate-reply` and a UI button take the same path. |
 | Calendar | A generated time-slot picker instead of Calendly |
 | Email | Sends to a throwaway [Ethereal](https://ethereal.email) inbox, with a preview link on each email, until `SMTP_USER` and `SMTP_PASS` are set. With them set, it sends real email. |
 
 **Skipped:**
 
-- Real inbox connection
 - Rescheduling or cancelling a meeting in the app, and telling a candidate when a meeting is cancelled
 - Timezones on booking slots, which use the server's timezone
 - Closing a job, and user sign-up. The seed creates the admin account.
@@ -168,4 +168,5 @@ Anything else waits for approval as usual.
 - **Search uses `ILIKE`.** That is fine at this size, and a real deployment would add trigram indexes.
 - **Background AI jobs use the OpenAI SDK directly** for strict JSON output, while the chat agent uses LangChain.
 - **Costs use one price per token**, set in `.env`, and only count OpenAI calls made through `LlmService`. The small reader for typed answers in campaign setup isn't counted.
+- **Inbox replies are polled every minute**, not pushed, so one can take up to a minute to appear. It uses the sending account, and matching on the thread means a reply written as a brand-new email isn't picked up.
 - **A wrong reply label** can be corrected with the status control, but the AI won't re-read the reply.

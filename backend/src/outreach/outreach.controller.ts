@@ -12,7 +12,7 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { CampaignStatus } from '@prisma/client';
+import { CampaignChange, CampaignStatus } from '@prisma/client';
 import {
   IsEnum,
   IsNotEmpty,
@@ -72,6 +72,16 @@ export class OutreachController {
     @GetUser('id') userId: string,
   ) {
     return this.outreach.updateDraft(id, emailId, userId, dto);
+  }
+
+  @Post(':id/stop')
+  @HttpCode(HttpStatus.OK)
+  async stop(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') userId: string,
+  ) {
+    await this.outreach.applyChange(id, userId, CampaignChange.STOP, null);
+    return { success: true };
   }
 
   @Post(':id/pause')

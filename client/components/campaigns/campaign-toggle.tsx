@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Pause, Play } from "lucide-react";
+import { Pause, Play, Square } from "lucide-react";
 import { secondaryButton } from "@/components/chat/action-buttons";
 import { useList } from "@/components/list/list-context";
 import { api, errorMessage } from "@/lib/api";
@@ -42,6 +42,49 @@ export function CampaignToggle({ campaign }: { campaign: CampaignRow }) {
           <Play className="size-4" aria-hidden />
         )}
         {isSending ? "Pause" : "Resume"}
+      </button>
+      {error && (
+        <p role="alert" className="mt-1 text-xs font-medium text-danger-strong">
+          {error}
+        </p>
+      )}
+    </>
+  );
+}
+
+export function CampaignStop({ campaign }: { campaign: CampaignRow }) {
+  const { pending, refresh } = useList();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function stop() {
+    const confirmed = window.confirm(
+      `Stop ${campaign.name} for good? Emails not sent yet are cancelled, and its candidates can join a new campaign.`,
+    );
+    if (!confirmed) return;
+
+    setSaving(true);
+    setError(null);
+    try {
+      await api(`/campaigns/${campaign.id}/stop`, { method: "POST" });
+      refresh();
+    } catch (cause) {
+      setError(errorMessage(cause));
+    }
+    setSaving(false);
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={stop}
+        disabled={saving || pending}
+        aria-label={`Stop ${campaign.name}`}
+        className={`${secondaryButton} flex items-center gap-2`}
+      >
+        <Square className="size-4" aria-hidden />
+        Stop
       </button>
       {error && (
         <p role="alert" className="mt-1 text-xs font-medium text-danger-strong">

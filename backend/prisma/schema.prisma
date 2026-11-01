@@ -64,6 +64,7 @@ enum CardType {
   CAMPAIGN_DRAFTS
   CAMPAIGN_PROGRESS
   CAMPAIGN_CHANGE
+  CONFIRMATION
   QUESTION
   CANDIDATE_REPLY
   MEETING_BOOKED
@@ -89,9 +90,14 @@ enum PendingActionType {
   SEND_REPLY
   CHANGE_STATUS
   CHANGE_CAMPAIGN
+  APPROVE_REPLY
+  RETRY_SCORING
+  UPDATE_JOB
+  CHANGE_AUTO_REPLY
 }
 
 enum CampaignChange {
+  SEND
   PAUSE
   RESUME
   STOP
@@ -140,6 +146,7 @@ enum ActivityActor {
 
 enum ActivityType {
   JOB_CREATED
+  JOB_UPDATED
   SOURCING_STARTED
   SOURCING_FINISHED
   CANDIDATE_STATUS_CHANGED
@@ -335,6 +342,13 @@ model PendingAction {
   campaign     Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   campaignName String?
   campaignChange CampaignChange?
+
+  // What a plain confirmation card shows, so new proposals need no card of their own
+  title        String?
+  detail       String?   @db.Text
+  confirmLabel String?
+  enabled      Boolean?
+
   dayOffsets   Int[]
   dailyLimit   Int?
   instructions String?   @db.Text
@@ -511,6 +525,8 @@ model CandidateReply {
   draftBody       String?              @db.Text
   draftStatus     ReplyDraftStatus?
   autoSent        Boolean              @default(false)
+  // Set on replies read from the real inbox, so one email is never handled twice
+  inboundMessageId String?             @unique
   sentAt          DateTime?
   messageId       String?
   previewUrl      String?

@@ -42,11 +42,15 @@ export type SourcingRun = {
 
 export type PendingAction = {
   id: string;
+  type: string;
   status: "PENDING" | "EXECUTED" | "CANCELLED" | "FAILED";
   decision: string | null;
   jobId: string | null;
   campaignName: string | null;
-  campaignChange: "PAUSE" | "RESUME" | "STOP" | null;
+  campaignChange: "SEND" | "PAUSE" | "RESUME" | "STOP" | null;
+  title: string | null;
+  detail: string | null;
+  confirmLabel: string | null;
   dayOffsets: number[];
   dailyLimit: number | null;
   instructions: string | null;
@@ -72,6 +76,7 @@ export type CardType =
   | "CAMPAIGN_DRAFTS"
   | "CAMPAIGN_PROGRESS"
   | "CAMPAIGN_CHANGE"
+  | "CONFIRMATION"
   | "QUESTION"
   | "CANDIDATE_REPLY"
   | "MEETING_BOOKED";

@@ -174,6 +174,19 @@ export class SourcingService implements OnModuleInit, OnModuleDestroy {
     return run;
   }
 
+  // Scoring only picks up unscored rows, so this finishes a run that failed part way
+  async retryScoring(jobId: string) {
+    const runs = await this.prisma.sourcingRun.findMany({
+      where: { jobId, candidates: { some: { score: null } } },
+      select: { id: true },
+    });
+
+    for (const { id } of runs) {
+      await this.updateRun(id, { status: RunStatus.SCORING, error: null });
+      await this.scoringQueue.add('score', { runId: id }, JOB_OPTIONS);
+    }
+  }
+
   private async runSearch(queueJob: QueueJob<RunPayload>) {
     const { runId } = queueJob.data;
     const run = await this.prisma.sourcingRun.findUniqueOrThrow({
