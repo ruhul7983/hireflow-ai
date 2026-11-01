@@ -12,6 +12,7 @@ import type {
   ChatCompletionTool,
 } from 'openai/resources/chat/completions';
 import { CampaignSetupService } from 'src/campaign-setup/campaign-setup.service';
+import { DashboardService } from 'src/dashboard/dashboard.service';
 import { LlmService } from 'src/llm/llm.service';
 import { OutreachService } from 'src/outreach/outreach.service';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -62,6 +63,7 @@ How you work:
 - You can't send email or approve drafts. The recruiter approves drafts on the review card. Emails are personalised per candidate, so you can't change them from chat. The recruiter edits them on the card.
 - Candidate replies are classified automatically and shown on their own cards. Each reply draft is approved on its card, never from chat. You can't send a reply or change a draft.
 - When a reply wants a meeting, a booking link goes out with the approved reply and the candidate picks a time themselves. You can't book, move or cancel meetings.
+- When asked how a job is going, call get_job_stats, and call list_jobs first if they named a job that isn't the current one. Reply in two or three plain sentences with the key numbers and the most useful next step. Use only the numbers returned, and if the sample is too small to mean much, say so.
 - When the recruiter wants to change a candidate's stage, such as "mark Rahim as hired", call propose_status_change with the name as they said it. A card asks them to confirm. If several people match, ask which one they mean.`;
 
 const nullableString = { type: ['string', 'null'] };
@@ -297,6 +299,7 @@ export class AgentService {
     private readonly candidates: CandidatesService,
     private readonly outreach: OutreachService,
     private readonly campaignSetup: CampaignSetupService,
+    private readonly dashboard: DashboardService,
   ) {}
 
   async handleMessage(conversationId: string, userId: string, content: string) {
@@ -670,14 +673,11 @@ export class AgentService {
     if (!targetId) return 'There is no job in this chat yet.';
 
     const job = await this.candidates.assertJobOwned(targetId, state.userId);
-    const counts = await this.prisma.candidate.groupBy({
-      by: ['status'],
-      where: { jobId: targetId },
-      _count: true,
-    });
+    const progress = await this.dashboard.jobProgress(targetId, state.userId);
+    const { funnel, exits } = progress;
 
-    const total = counts.reduce((sum, row) => sum + row._count, 0);
-    const byStatus = counts.map((row) => `${row.status}: ${row._count}`).join(', ');
+    const rate = (value: number | null) =>
+      value === null ? 'not available yet' : `${value}%`;
 
     const campaigns = await this.outreach.jobCampaigns(targetId);
     const outreach = campaigns.map(({ name, status, steps }) => {
@@ -687,7 +687,12 @@ export class AgentService {
     });
 
     return [
-      `${job.title}: ${total} candidates in total. ${byStatus || 'None yet.'}`,
+      `${job.title}. Candidates who reached each stage: ${Object.entries(funnel)
+        .map(([stage, count]) => `${stage} ${count}`)
+        .join(', ')}.`,
+      `Reply rate ${rate(progress.replyRate)}, interested rate ${rate(progress.interestedRate)}.`,
+      `Left the process: ${exits.rejected} rejected, ${exits.notInterested} not interested, ${exits.unsubscribed} unsubscribed.`,
+      `${progress.upcomingMeetings} upcoming meetings, ${progress.waitingOnRecruiter} items waiting on the recruiter.`,
       ...outreach,
     ].join(' ');
   }

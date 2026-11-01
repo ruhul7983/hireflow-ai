@@ -3,24 +3,15 @@
 import { useState } from "react";
 import type { KeyboardEvent, PointerEvent } from "react";
 import { Panel } from "@/components/dashboard/panel";
-import { weeks } from "@/lib/demo-dashboard";
+import { weekLabel } from "@/lib/dashboard-format";
+import type { WeekCounts } from "@/lib/dashboard-types";
 
-const AXIS_MAX = 20;
-const AXIS_TICKS = [20, 15, 10, 5, 0];
+const AXIS_STEPS = 4;
 
 const SERIES = [
   { key: "contacted", label: "Contacted", color: "var(--color-muted)" },
   { key: "replied", label: "Replies", color: "var(--color-brand)" },
 ] as const;
-
-const xAt = (index: number) => (index / (weeks.length - 1)) * 100;
-const yAt = (value: number) => 100 - (value / AXIS_MAX) * 100;
-
-function linePath(key: (typeof SERIES)[number]["key"]) {
-  return weeks
-    .map((week, index) => `${index ? "L" : "M"}${xAt(index)} ${yAt(week[key])}`)
-    .join(" ");
-}
 
 function Legend() {
   return (
@@ -39,9 +30,34 @@ function Legend() {
   );
 }
 
-export function OutreachChart({ className = "" }: { className?: string }) {
+type OutreachChartProps = {
+  weeks: WeekCounts[];
+  className?: string;
+};
+
+export function OutreachChart({ weeks, className = "" }: OutreachChartProps) {
   const [active, setActive] = useState<number | null>(null);
   const lastIndex = weeks.length - 1;
+
+  // Rounds up so the axis labels stay whole numbers at any volume
+  const largest = Math.max(
+    ...weeks.flatMap(({ contacted, replied }) => [contacted, replied]),
+    1,
+  );
+  const axisMax = Math.ceil(largest / AXIS_STEPS) * AXIS_STEPS;
+  const axisTicks = Array.from(
+    { length: AXIS_STEPS + 1 },
+    (_, step) => (axisMax / AXIS_STEPS) * (AXIS_STEPS - step),
+  );
+
+  const xAt = (index: number) => (index / lastIndex) * 100;
+  const yAt = (value: number) => 100 - (value / axisMax) * 100;
+
+  function linePath(key: (typeof SERIES)[number]["key"]) {
+    return weeks
+      .map((week, index) => `${index ? "L" : "M"}${xAt(index)} ${yAt(week[key])}`)
+      .join(" ");
+  }
 
   function handlePointerMove(event: PointerEvent<HTMLDivElement>) {
     const { left, width } = event.currentTarget.getBoundingClientRect();
@@ -72,7 +88,7 @@ export function OutreachChart({ className = "" }: { className?: string }) {
           aria-hidden
           className="relative h-64 w-5 shrink-0 text-right text-xs text-muted"
         >
-          {AXIS_TICKS.map((tick) => (
+          {axisTicks.map((tick) => (
             <span
               key={tick}
               className="absolute right-0 -translate-y-1/2"
@@ -95,7 +111,7 @@ export function OutreachChart({ className = "" }: { className?: string }) {
             onBlur={() => setActive(null)}
             className="relative h-64 rounded outline-none focus-visible:ring-2 focus-visible:ring-brand/40"
           >
-            {AXIS_TICKS.map((tick) => (
+            {axisTicks.map((tick) => (
               <span
                 key={tick}
                 aria-hidden
@@ -165,7 +181,9 @@ export function OutreachChart({ className = "" }: { className?: string }) {
                   }`}
                   style={{ left: `${xAt(active)}%` }}
                 >
-                  <p className="font-semibold">Week of {activeWeek.week}</p>
+                  <p className="font-semibold">
+                    Week of {weekLabel(activeWeek.weekStart)}
+                  </p>
                   {SERIES.map(({ key, label }) => (
                     <p key={key} className="mt-0.5 text-white/85">
                       {label}: {activeWeek[key]}
@@ -177,15 +195,15 @@ export function OutreachChart({ className = "" }: { className?: string }) {
           </div>
 
           <div aria-hidden className="relative mt-2 h-4 text-xs text-muted">
-            {weeks.map(({ week }, index) => (
+            {weeks.map(({ weekStart }, index) => (
               <span
-                key={week}
+                key={weekStart}
                 className={`absolute -translate-x-1/2 whitespace-nowrap ${
                   index % 2 ? "hidden md:block" : ""
                 }`}
                 style={{ left: `${xAt(index)}%` }}
               >
-                {week}
+                {weekLabel(weekStart)}
               </span>
             ))}
           </div>

@@ -4,6 +4,8 @@ import { AuthModule } from 'src/auth/auth.module';
 import { CampaignAnswerReader } from 'src/campaign-setup/campaign-setup.answers';
 import { CampaignSetupService } from 'src/campaign-setup/campaign-setup.service';
 import { PrismaCheckpointSaver } from 'src/campaign-setup/prisma-checkpoint.saver';
+import { DashboardController } from 'src/dashboard/dashboard.controller';
+import { DashboardService } from 'src/dashboard/dashboard.service';
 import { MeetingsController } from 'src/meetings/meetings.controller';
 import { MeetingsService } from 'src/meetings/meetings.service';
 import { DraftingService } from 'src/outreach/drafting.service';
@@ -28,6 +30,7 @@ import { PipelineService } from './pipeline.service';
   imports: [AuthModule],
   controllers: [
     ChatController,
+    DashboardController,
     MeetingsController,
     OutreachController,
     RepliesController,
@@ -39,6 +42,7 @@ import { PipelineService } from './pipeline.service';
     CampaignSetupService,
     CandidatesService,
     ChatService,
+    DashboardService,
     DraftingService,
     EventsService,
     MailerService,

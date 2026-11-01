@@ -1,6 +1,7 @@
+import Link from "next/link";
 import { Panel } from "@/components/dashboard/panel";
-import { formatPercentage, jobs, percentage } from "@/lib/demo-dashboard";
-import type { DemoJob } from "@/lib/demo-dashboard";
+import { formatPercentage } from "@/lib/dashboard-format";
+import type { DashboardJob } from "@/lib/dashboard-types";
 
 const NUMERIC_COLUMNS = [
   "Candidates",
@@ -10,13 +11,26 @@ const NUMERIC_COLUMNS = [
   "Hires",
 ];
 
-const PHASE_TONES: Record<DemoJob["phase"], string> = {
+const PHASE_TONES: Record<DashboardJob["phase"], string> = {
   Sourcing: "bg-warning-soft text-warning-strong",
   Outreach: "bg-brand-soft text-brand-strong",
   Interviewing: "bg-success-soft text-success-strong",
+  Hired: "bg-success-soft text-success-strong",
 };
 
-export function JobsTable({ className = "" }: { className?: string }) {
+const WORK_MODES = { ONSITE: "On-site", HYBRID: "Hybrid", REMOTE: "Remote" };
+
+function jobLocation({ location, remotePolicy }: DashboardJob) {
+  const parts = [location, remotePolicy && WORK_MODES[remotePolicy]];
+  return parts.filter(Boolean).join(" · ") || "Location not set";
+}
+
+type JobsTableProps = {
+  jobs: DashboardJob[];
+  className?: string;
+};
+
+export function JobsTable({ jobs, className = "" }: JobsTableProps) {
   return (
     <Panel
       title="Jobs"
@@ -46,42 +60,47 @@ export function JobsTable({ className = "" }: { className?: string }) {
             </tr>
           </thead>
           <tbody>
-            {jobs.map(({ id, title, location, phase, funnel }) => (
+            {jobs.map((job) => (
               <tr
-                key={id}
+                key={job.id}
                 className="border-b border-line last:border-0 hover:bg-canvas"
               >
                 <th scope="row" className="py-3 pr-4 text-left font-semibold">
-                  {title}
+                  {job.conversationId ? (
+                    <Link
+                      href={`/chat?c=${job.conversationId}`}
+                      className="hover:text-brand-strong hover:underline"
+                    >
+                      {job.title}
+                    </Link>
+                  ) : (
+                    job.title
+                  )}
                   <span className="block text-xs font-normal text-muted">
-                    {location}
+                    {jobLocation(job)}
                   </span>
                 </th>
                 <td className="py-3 pr-4 whitespace-nowrap">
                   <span
-                    className={`rounded-full px-2.5 py-1 text-xs font-semibold ${PHASE_TONES[phase]}`}
+                    className={`rounded-full px-2.5 py-1 text-xs font-semibold ${PHASE_TONES[job.phase]}`}
                   >
-                    {phase}
+                    {job.phase}
                   </span>
                 </td>
                 <td className="py-3 pl-4 text-right tabular-nums">
-                  {funnel.sourced}
+                  {job.funnel.sourced}
                 </td>
                 <td className="py-3 pl-4 text-right tabular-nums">
-                  {formatPercentage(
-                    percentage(funnel.replied, funnel.contacted),
-                  )}
+                  {formatPercentage(job.replyRate)}
                 </td>
                 <td className="py-3 pl-4 text-right tabular-nums">
-                  {formatPercentage(
-                    percentage(funnel.interested, funnel.replied),
-                  )}
+                  {formatPercentage(job.interestedRate)}
                 </td>
                 <td className="py-3 pl-4 text-right tabular-nums">
-                  {funnel.meetings}
+                  {job.funnel.meetings}
                 </td>
                 <td className="py-3 pl-4 text-right tabular-nums">
-                  {funnel.hired}
+                  {job.funnel.hired}
                 </td>
               </tr>
             ))}

@@ -1,18 +1,23 @@
 import { Panel } from "@/components/dashboard/panel";
-import { formatPercentage, funnel, percentage } from "@/lib/demo-dashboard";
+import { formatPercentage, percentage } from "@/lib/dashboard-format";
+import type { Dashboard } from "@/lib/dashboard-types";
 
-export function FunnelChart({ className = "" }: { className?: string }) {
-  const largest = funnel[0].count;
+type FunnelChartProps = Pick<Dashboard, "stages" | "exits"> & {
+  className?: string;
+};
+
+export function FunnelChart({ stages, exits, className = "" }: FunnelChartProps) {
+  const largest = Math.max(stages[0]?.count ?? 0, 1);
 
   return (
     <Panel
       title="Hiring funnel"
-      description="Candidates who reached each stage"
+      description="The furthest stage each candidate reached"
       className={className}
     >
       <ol className="space-y-1.5">
-        {funnel.map(({ key, label, count }, index) => {
-          const previous = funnel[index - 1];
+        {stages.map(({ key, label, count }, index) => {
+          const previous = stages[index - 1];
 
           return (
             <li
@@ -24,10 +29,12 @@ export function FunnelChart({ className = "" }: { className?: string }) {
                 {label}
               </span>
               <span className="h-5 min-w-0 flex-1 rounded-r bg-canvas">
-                <span
-                  className="block h-full rounded-r bg-brand transition-colors group-hover:bg-brand-strong"
-                  style={{ width: `max(2px, ${(count / largest) * 100}%)` }}
-                />
+                {count > 0 && (
+                  <span
+                    className="block h-full rounded-r bg-brand transition-colors group-hover:bg-brand-strong"
+                    style={{ width: `max(2px, ${(count / largest) * 100}%)` }}
+                  />
+                )}
               </span>
               <span className="w-8 shrink-0 text-right text-sm font-semibold tabular-nums">
                 {count}
@@ -43,6 +50,11 @@ export function FunnelChart({ className = "" }: { className?: string }) {
           );
         })}
       </ol>
+
+      <p className="mt-4 text-xs text-muted">
+        Left the process: {exits.rejected} rejected, {exits.notInterested} not
+        interested, {exits.unsubscribed} unsubscribed
+      </p>
     </Panel>
   );
 }
