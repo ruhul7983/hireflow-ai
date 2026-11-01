@@ -1,4 +1,5 @@
 import { Bot } from "lucide-react";
+import { CampaignChangeCard } from "@/components/chat/campaign-change-card";
 import { CampaignDraftsCard } from "@/components/chat/campaign-drafts-card";
 import { CampaignProgressCard } from "@/components/chat/campaign-progress-card";
 import { CampaignProposalCard } from "@/components/chat/campaign-proposal-card";
@@ -74,6 +75,9 @@ function Card({ message, conversationId, refreshKey, onChanged }: MessageBubbleP
   }
   if (cardType === "CAMPAIGN_PROPOSAL" && pendingAction) {
     return <CampaignProposalCard action={pendingAction} onChanged={onChanged} />;
+  }
+  if (cardType === "CAMPAIGN_CHANGE" && pendingAction) {
+    return <CampaignChangeCard action={pendingAction} onChanged={onChanged} />;
   }
   if (cardType === "CAMPAIGN_DRAFTS" && campaignId) {
     return (

@@ -19,6 +19,7 @@ const STATUS_LABELS: Record<string, string> = {
   SENDING: "Sending",
   PAUSED: "Paused",
   COMPLETED: "Finished",
+  CANCELLED: "Stopped",
 };
 
 const EMAIL_LABELS: Record<OutboundEmail["status"], string> = {
@@ -156,7 +157,7 @@ export function CampaignProgressCard({
         <p className="text-sm text-muted">
           {sent} of {emails.length} sent
           {failed > 0 && `, ${failed} failed`}
-          {stopped > 0 && `, ${stopped} stopped after a reply`}, up to{" "}
+          {stopped > 0 && `, ${stopped} stopped`}, up to{" "}
           {campaign.dailyLimit} a day
         </p>
         {actionError && (

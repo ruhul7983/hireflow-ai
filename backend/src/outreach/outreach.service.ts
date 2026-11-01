@@ -11,11 +11,13 @@ import { ConfigService } from '@nestjs/config';
 import {
   ActivityActor,
   ActivityType,
+  CampaignChange,
   CampaignStatus,
   CandidateStatus,
   CardType,
   EmailStatus,
   MessageRole,
+  PendingActionStatus,
   PendingActionType,
   Prisma,
 } from '@prisma/client';
@@ -55,6 +57,25 @@ const NEVER_EMAIL: CandidateStatus[] = [
 ];
 
 const UNSENT_STATUSES: EmailStatus[] = [EmailStatus.APPROVED, EmailStatus.SENDING];
+
+// Drafting is left out, because the draft job would bring a stopped campaign back
+export const CHANGEABLE_STATUSES: CampaignStatus[] = [
+  CampaignStatus.DRAFT,
+  CampaignStatus.SENDING,
+  CampaignStatus.PAUSED,
+];
+
+export const CHANGE_NEEDS_STATUS: Record<CampaignChange, CampaignStatus[]> = {
+  PAUSE: [CampaignStatus.SENDING],
+  RESUME: [CampaignStatus.PAUSED],
+  STOP: CHANGEABLE_STATUSES,
+};
+
+const CHANGE_LABELS: Record<CampaignChange, string> = {
+  PAUSE: 'Paused',
+  RESUME: 'Resumed',
+  STOP: 'Stopped',
+};
 
 type OutreachPayload = { campaignId?: string; emailId?: string };
 
@@ -146,6 +167,25 @@ export class OutreachService implements OnModuleInit, OnModuleDestroy {
         recipients: { none: { campaign: { status: { in: ACTIVE_STATUSES } } } },
       },
       orderBy: [{ score: { sort: 'desc', nulls: 'last' } }, { createdAt: 'asc' }],
+    });
+  }
+
+  // Says which campaigns hold the accepted candidates, so "nobody to contact" isn't a dead end
+  campaignsHoldingCandidates(jobId: string) {
+    return this.prisma.campaign.findMany({
+      where: {
+        jobId,
+        status: { in: ACTIVE_STATUSES },
+        recipients: {
+          some: {
+            candidate: {
+              status: CandidateStatus.ACCEPTED,
+              email: { not: null },
+            },
+          },
+        },
+      },
+      select: { name: true, status: true },
     });
   }
 
@@ -728,6 +768,81 @@ export class OutreachService implements OnModuleInit, OnModuleDestroy {
       throw new ConflictException('This campaign can no longer be changed');
     }
     return { success: true };
+  }
+
+  // A send already claimed may finish, but stopping keeps anything else from going out
+  private async stopCampaign(campaignId: string) {
+    const { count } = await this.prisma.campaign.updateMany({
+      where: { id: campaignId, status: { in: CHANGEABLE_STATUSES } },
+      data: { status: CampaignStatus.CANCELLED },
+    });
+
+    if (count === 0) {
+      throw new ConflictException('This campaign can no longer be stopped');
+    }
+
+    await this.prisma.$transaction([
+      this.prisma.outboundEmail.updateMany({
+        where: {
+          campaignStep: { campaignId },
+          status: { in: [EmailStatus.DRAFT, EmailStatus.APPROVED] },
+        },
+        data: { status: EmailStatus.STOPPED },
+      }),
+      this.prisma.pendingAction.updateMany({
+        where: {
+          campaignId,
+          type: PendingActionType.SEND_CAMPAIGN,
+          status: PendingActionStatus.PENDING,
+        },
+        data: {
+          status: PendingActionStatus.CANCELLED,
+          resolvedAt: new Date(),
+        },
+      }),
+    ]);
+  }
+
+  // Called from the confirm path only, and the status goes first so a refused change
+  // leaves the limit alone
+  async applyChange(
+    campaignId: string,
+    userId: string,
+    change: CampaignChange | null,
+    dailyLimit: number | null,
+  ) {
+    const campaign = await this.findOwned(campaignId, userId);
+
+    if (change === CampaignChange.STOP) {
+      await this.stopCampaign(campaignId);
+    } else if (change) {
+      await this.setPaused(campaignId, userId, change === CampaignChange.PAUSE);
+    }
+
+    const newLimit = change === CampaignChange.STOP ? null : dailyLimit;
+    if (newLimit) {
+      await this.prisma.campaign.update({
+        where: { id: campaignId },
+        data: { dailyLimit: newLimit },
+      });
+    }
+
+    const summary = [
+      change && `${CHANGE_LABELS[change]} ${campaign.name}`,
+      newLimit && `${campaign.name} limit set to ${newLimit} a day`,
+    ]
+      .filter(Boolean)
+      .join('. ');
+
+    await this.prisma.activityLog.create({
+      data: {
+        jobId: campaign.jobId,
+        actor: ActivityActor.RECRUITER,
+        type: ActivityType.CAMPAIGN_CHANGED,
+        summary,
+      },
+    });
+    return summary;
   }
 
   jobCampaigns(jobId: string) {

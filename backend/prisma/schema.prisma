@@ -63,6 +63,7 @@ enum CardType {
   CAMPAIGN_PROPOSAL
   CAMPAIGN_DRAFTS
   CAMPAIGN_PROGRESS
+  CAMPAIGN_CHANGE
   QUESTION
   CANDIDATE_REPLY
   MEETING_BOOKED
@@ -87,6 +88,13 @@ enum PendingActionType {
   SEND_CAMPAIGN
   SEND_REPLY
   CHANGE_STATUS
+  CHANGE_CAMPAIGN
+}
+
+enum CampaignChange {
+  PAUSE
+  RESUME
+  STOP
 }
 
 enum PendingActionStatus {
@@ -137,6 +145,7 @@ enum ActivityType {
   CANDIDATE_STATUS_CHANGED
   CAMPAIGN_CREATED
   CAMPAIGN_APPROVED
+  CAMPAIGN_CHANGED
   EMAIL_SENT
   REPLY_RECEIVED
   REPLY_SENT
@@ -325,6 +334,7 @@ model PendingAction {
   campaignId   String?
   campaign     Campaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
   campaignName String?
+  campaignChange CampaignChange?
   dayOffsets   Int[]
   dailyLimit   Int?
   instructions String?   @db.Text

@@ -103,6 +103,7 @@ function approvalKind(type: PendingActionType) {
       return 'reply';
     case PendingActionType.CREATE_CAMPAIGN:
     case PendingActionType.SEND_CAMPAIGN:
+    case PendingActionType.CHANGE_CAMPAIGN:
       return 'campaign';
     case PendingActionType.CREATE_JOB:
       return 'job';
@@ -248,6 +249,8 @@ export class DashboardService {
           return `Confirm the plan for ${action.campaignName}`;
         case PendingActionType.SEND_CAMPAIGN:
           return `Approve drafts for ${action.campaign?.name ?? 'a campaign'}`;
+        case PendingActionType.CHANGE_CAMPAIGN:
+          return `Confirm a change to ${action.campaignName}`;
         case PendingActionType.SEND_REPLY:
           return `Reply to ${action.reply?.candidate.name ?? 'a candidate'}`;
         default:

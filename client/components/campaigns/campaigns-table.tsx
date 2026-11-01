@@ -28,7 +28,7 @@ function progressLabel({ total, sent, failed, stopped }: CampaignRow["emails"]) 
   return [
     `${sent} of ${total} sent`,
     failed > 0 && `${failed} failed`,
-    stopped > 0 && `${stopped} stopped after a reply`,
+    stopped > 0 && `${stopped} stopped`,
   ]
     .filter(Boolean)
     .join(", ");

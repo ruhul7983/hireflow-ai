@@ -24,30 +24,32 @@ export class MailerService {
 
   constructor(private readonly configService: ConfigService) {}
 
-  // Without SMTP settings, mail goes to a throwaway Ethereal inbox. It is really
+  // Without a mail account, mail goes to a throwaway Ethereal inbox. It is really
   // sent and can be opened from a preview link, but never reaches the candidate.
   private async connect(): Promise<Mailbox> {
     const host = this.configService.get<string>('SMTP_HOST');
+    const user = this.configService.get<string>('SMTP_USER');
+    // Google shows app passwords in groups, and they work without the spaces
+    const pass = this.configService.get<string>('SMTP_PASS')?.replace(/\s/g, '');
 
-    if (host) {
-      const user = this.configService.get<string>('SMTP_USER');
-      const port = Number(this.configService.get('SMTP_PORT') ?? 587);
+    if (host && user && pass) {
+      const port = Number(this.configService.get('SMTP_PORT') || 587);
 
       return {
-        from: this.configService.get<string>('SMTP_FROM') ?? user ?? '',
+        from: this.configService.get<string>('SMTP_FROM') || user,
         transporter: nodemailer.createTransport({
           host,
           port,
           secure: port === 465,
-          auth: user
-            ? { user, pass: this.configService.get<string>('SMTP_PASS') }
-            : undefined,
+          auth: { user, pass },
         }),
       };
     }
 
     const account = await nodemailer.createTestAccount();
-    this.logger.warn('SMTP_HOST is not set, so email goes to an Ethereal test inbox');
+    this.logger.warn(
+      'SMTP_USER or SMTP_PASS is not set, so email goes to an Ethereal test inbox',
+    );
 
     return {
       from: account.user,

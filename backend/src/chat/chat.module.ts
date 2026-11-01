@@ -21,6 +21,7 @@ import { ScoringService } from 'src/sourcing/scoring.service';
 import { SerperService } from 'src/sourcing/serper.service';
 import { SourcingService } from 'src/sourcing/sourcing.service';
 import { ActionsService } from './actions.service';
+import { AgentToolsService } from './agent-tools.service';
 import { AgentService } from './agent.service';
 import { CandidatesService } from './candidates.service';
 import { ChatController } from './chat.controller';
@@ -41,6 +42,7 @@ import { PipelineService } from './pipeline.service';
   providers: [
     ActionsService,
     AgentService,
+    AgentToolsService,
     CampaignAnswerReader,
     CampaignSetupService,
     CandidatesService,

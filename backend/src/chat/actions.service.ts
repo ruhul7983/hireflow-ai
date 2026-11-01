@@ -9,6 +9,7 @@ import {
 import {
   ActivityActor,
   ActivityType,
+  CampaignChange,
   CandidateStatus,
   CardType,
   MessageRole,
@@ -52,6 +53,12 @@ export type CampaignProposal = {
   dailyLimit: number;
   instructions: string | null;
   candidateIds: string[];
+};
+
+const CHANGE_NOTES: Record<CampaignChange, string> = {
+  PAUSE: 'pause it. Nothing more goes out until you resume it',
+  RESUME: 'resume it',
+  STOP: 'stop it for good. Emails not sent yet are cancelled',
 };
 
 function candidateCount(count: number) {
@@ -199,6 +206,37 @@ export class ActionsService {
     };
   }
 
+  async proposeCampaignChange(
+    conversationId: string,
+    campaign: { id: string; jobId: string; name: string },
+    change: CampaignChange | null,
+    dailyLimit: number | null,
+  ): Promise<ProposedCard> {
+    await this.supersede(conversationId, PendingActionType.CHANGE_CAMPAIGN);
+
+    const action = await this.prisma.pendingAction.create({
+      data: {
+        conversationId,
+        type: PendingActionType.CHANGE_CAMPAIGN,
+        jobId: campaign.jobId,
+        campaignId: campaign.id,
+        campaignName: campaign.name,
+        campaignChange: change,
+        dailyLimit,
+      },
+    });
+
+    const limitNote = dailyLimit ? ` The limit becomes ${dailyLimit} a day.` : '';
+    return {
+      content: change
+        ? `Please confirm you want to ${CHANGE_NOTES[change]}.${limitNote}`
+        : `Please confirm the new limit.${limitNote}`,
+      cardType: CardType.CAMPAIGN_CHANGE,
+      pendingActionId: action.id,
+      jobId: campaign.jobId,
+    };
+  }
+
   async proposeCampaign(
     conversationId: string,
     jobId: string,
@@ -281,7 +319,8 @@ export class ActionsService {
     const action = await this.findOwned(actionId, userId);
     await this.claim(actionId, PendingActionStatus.CANCELLED);
 
-    if (action.campaignId) {
+    // Only for drafts. Declining a change must leave the campaign running.
+    if (action.campaignId && action.type === PendingActionType.SEND_CAMPAIGN) {
       await this.outreach.discard(action.campaignId);
     }
     if (action.replyId) {
@@ -312,6 +351,8 @@ export class ActionsService {
       case PendingActionType.SEND_CAMPAIGN:
         if (!action.campaignId) throw new Error('The campaign no longer exists');
         return this.outreach.approve(action.campaignId);
+      case PendingActionType.CHANGE_CAMPAIGN:
+        return this.changeCampaign(action, userId);
       case PendingActionType.SEND_REPLY:
         if (!action.replyId) throw new Error('The reply no longer exists');
         return this.replies.approve(action.replyId);
@@ -411,6 +452,25 @@ export class ActionsService {
       instructions: action.instructions,
       senderName: user.name ?? user.email,
       candidateIds: action.candidates.map(({ candidateId }) => candidateId),
+    });
+  }
+
+  private async changeCampaign(
+    action: Awaited<ReturnType<ActionsService['findOwned']>>,
+    userId: string,
+  ) {
+    if (!action.campaignId) throw new Error('The campaign no longer exists');
+
+    const summary = await this.outreach.applyChange(
+      action.campaignId,
+      userId,
+      action.campaignChange,
+      action.dailyLimit,
+    );
+
+    await this.chat.appendMessage(action.conversationId, {
+      role: MessageRole.ASSISTANT,
+      content: `Done. ${summary}.`,
     });
   }
 

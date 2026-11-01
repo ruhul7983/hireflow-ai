@@ -49,7 +49,7 @@ function validDays(days: number[] | null | undefined) {
   return sorted[0] === 0 && sorted.every(Number.isInteger) ? sorted : null;
 }
 
-function validLimit(limit: number | null | undefined) {
+export function validLimit(limit: number | null | undefined) {
   return limit && limit >= 1 && limit <= MAX_DAILY_LIMIT ? limit : null;
 }
 
@@ -101,8 +101,9 @@ export class CampaignSetupService {
     if (stale) await this.closeQuestion(stale.id, stale.threadId);
     await this.actions.cancelOpenCampaignPlans(conversationId);
 
-    const [eligible, withoutEmail] = await Promise.all([
+    const [eligible, holding, withoutEmail] = await Promise.all([
       this.outreach.eligibleCandidates(conversation.jobId),
+      this.outreach.campaignsHoldingCandidates(conversation.jobId),
       this.prisma.candidate.count({
         where: {
           jobId: conversation.jobId,
@@ -113,11 +114,17 @@ export class CampaignSetupService {
     ]);
 
     if (eligible.length === 0) {
+      const live = holding
+        .map(({ name, status }) => `${name} (${status.toLowerCase()})`)
+        .join(', ');
+
       await this.say(
         conversationId,
-        withoutEmail > 0
-          ? `${withoutEmail} accepted candidates have no email address, so they can't be contacted. Search results don't include emails, so please upload a CSV that has them.`
-          : 'There is nobody to contact yet. Accept some candidates first. Anyone already in a live campaign is left out.',
+        live
+          ? `Your accepted candidates are already in ${live}. Ask me to resume it, or to stop it so you can set up a new one.`
+          : withoutEmail > 0
+            ? `${withoutEmail} accepted candidates have no email address, so they can't be contacted. Search results don't include emails, so please upload a CSV that has them.`
+            : "There is nobody to contact yet. Accept some candidates first. Anyone who has already been emailed isn't emailed again.",
       );
       return;
     }

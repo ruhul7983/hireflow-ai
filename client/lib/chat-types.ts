@@ -46,6 +46,7 @@ export type PendingAction = {
   decision: string | null;
   jobId: string | null;
   campaignName: string | null;
+  campaignChange: "PAUSE" | "RESUME" | "STOP" | null;
   dayOffsets: number[];
   dailyLimit: number | null;
   instructions: string | null;
@@ -70,6 +71,7 @@ export type CardType =
   | "CAMPAIGN_PROPOSAL"
   | "CAMPAIGN_DRAFTS"
   | "CAMPAIGN_PROGRESS"
+  | "CAMPAIGN_CHANGE"
   | "QUESTION"
   | "CANDIDATE_REPLY"
   | "MEETING_BOOKED";

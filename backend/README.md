@@ -84,9 +84,19 @@ Chat cards are stored as a type plus foreign keys, and the UI rebuilds each card
 
 ## How the agent works
 
-The agent is a tool-calling loop in `src/chat/agent.service.ts`. Each message is sent to the model with its tools, which are: read a job posting, draft a job, propose sourcing, list candidates, propose accept or reject, start campaign setup, propose a status change, list jobs, and get job stats.
+The agent is a LangChain tool-calling loop in `src/chat/agent.service.ts`. The tools are defined with LangChain's `tool()` and zod schemas in `src/chat/agent-tools.service.ts`, and bound to the model with `bindTools` in strict mode, so a call always matches its schema.
+
+Tool names are snake_case `verb_noun`, and the verb says what a tool may do:
+
+| Prefix | Meaning | Tools |
+| --- | --- | --- |
+| `read_`, `list_`, `get_` | Only look at data | `read_job_posting`, `list_jobs`, `list_candidates`, `list_campaigns`, `get_job_stats` |
+| `propose_` | Only show a card to confirm | `propose_job`, `propose_sourcing`, `propose_candidate_decision`, `propose_candidate_status_change`, `propose_campaign_change` |
+| `start_` | Hand over to a guided flow | `start_campaign_setup` |
 
 **Confirmation is enforced in code, not in the prompt.** A write tool never writes. It creates a `PendingAction` row and shows a card, and only `ActionsService.confirm` runs the action. A chat "yes" or "no" is decided by a regular expression before the model is called, so nothing inside a job post or a candidate profile can talk the model into approving something.
+
+**Campaigns can be controlled from chat.** `propose_campaign_change` can pause, resume or stop a campaign and change its daily limit, in one confirmed step such as "resume at 50 a day".
 
 **Sending has no agent tool on purpose.** Campaigns are approved on the review card or with a chat "yes" to that card. Reply drafts are only approved on their own card, because each one is a specific email to a specific person.
 
@@ -105,7 +115,7 @@ Progress reaches the chat over SSE. Events go through Redis pub/sub, so they wor
 ## Why this LLM and agent approach
 
 - **OpenAI `gpt-4o-mini`.** It is cheap enough to score every candidate, and strict JSON schema output means a bad response fails in validation instead of reaching the recruiter. The model is set by `OPEN_AI_MODEL`.
-- **Plain tool calling for the agent.** The main loop has a simple shape, and a safety rule is easier to prove in code you own than in a framework. A confirmation gate outside the model matters more than the framework.
+- **LangChain tool calling for the agent.** Typed tools and strict schemas keep the calls valid, and the loop stays in our code so the confirmation gate sits outside the model.
 - **LangGraph only for campaign setup.** This one flow really is a long-running, multi-question conversation that has to survive a restart, which is what `interrupt()` and checkpoints are for.
 - **Scores are limited in code.** The model reports whether location, seniority and must-have skills are stated, and code caps the score at 75, 80 or 60 if not. The model alone was too generous.
 
@@ -139,7 +149,7 @@ Anything else waits for approval as usual.
 | --- | --- |
 | Candidate inbox | `POST /simulate-reply` and a UI button. It is the same path a mail webhook would use. |
 | Calendar | A generated time-slot picker instead of Calendly |
-| Email | Sends to a throwaway [Ethereal](https://ethereal.email) inbox unless `SMTP_HOST` is set. Each email has a preview link. |
+| Email | Sends to a throwaway [Ethereal](https://ethereal.email) inbox, with a preview link on each email, until `SMTP_USER` and `SMTP_PASS` are set. With them set, it sends real email. |
 
 **Skipped:**
 
@@ -156,5 +166,6 @@ Anything else waits for approval as usual.
 - **Dashboard funnel by furthest stage.** It comes from the activity log, so someone who left still counts for stages they reached. Exits are shown beside it.
 - **Dashboard and lists refresh on load.** Only the chat is live.
 - **Search uses `ILIKE`.** That is fine at this size, and a real deployment would add trigram indexes.
+- **Background AI jobs use the OpenAI SDK directly** for strict JSON output, while the chat agent uses LangChain.
 - **Costs use one price per token**, set in `.env`, and only count OpenAI calls made through `LlmService`. The small reader for typed answers in campaign setup isn't counted.
 - **A wrong reply label** can be corrected with the status control, but the AI won't re-read the reply.
