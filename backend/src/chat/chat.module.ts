@@ -8,7 +8,10 @@ import { DashboardController } from 'src/dashboard/dashboard.controller';
 import { DashboardService } from 'src/dashboard/dashboard.service';
 import { JobsController } from 'src/jobs/jobs.controller';
 import { JobsService } from 'src/jobs/jobs.service';
-import { MeetingsController } from 'src/meetings/meetings.controller';
+import {
+  MeetingsController,
+  MeetingsListController,
+} from 'src/meetings/meetings.controller';
 import { MeetingsService } from 'src/meetings/meetings.service';
 import { DraftingService } from 'src/outreach/drafting.service';
 import { MailerService } from 'src/outreach/mailer.service';
@@ -37,6 +40,7 @@ import { PipelineService } from './pipeline.service';
     DashboardController,
     JobsController,
     MeetingsController,
+    MeetingsListController,
     OutreachController,
     RepliesController,
   ],

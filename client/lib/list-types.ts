@@ -1,4 +1,4 @@
-import type { Campaign } from "@/lib/chat-types";
+import type { Campaign, MeetingStatus } from "@/lib/chat-types";
 import type { DashboardJob } from "@/lib/dashboard-types";
 
 export type JobOption = { id: string; title: string };
@@ -23,6 +23,17 @@ export type CandidateRow = {
   status: string;
   nextStatuses: string[];
   job: JobOption;
+};
+
+export type MeetingRow = {
+  id: string;
+  status: MeetingStatus;
+  startsAt: string | null;
+  conversationId: string;
+  candidate: Pick<
+    CandidateRow,
+    "id" | "name" | "email" | "status" | "nextStatuses" | "job"
+  >;
 };
 
 export type CampaignRow = {

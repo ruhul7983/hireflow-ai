@@ -7,7 +7,11 @@ import { statusLabel } from "@/lib/candidate-status";
 import type { CandidateRow } from "@/lib/list-types";
 
 // Using the control is the recruiter's confirmation, the same as the chat table
-export function CandidateMove({ candidate }: { candidate: CandidateRow }) {
+export function CandidateMove({
+  candidate,
+}: {
+  candidate: Pick<CandidateRow, "id" | "name" | "nextStatuses" | "job">;
+}) {
   const { pending, refresh } = useList();
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);

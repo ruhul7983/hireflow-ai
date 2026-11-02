@@ -27,7 +27,8 @@ import { Job as QueueJob, Queue, Worker } from 'bullmq';
 import { CandidatesService } from 'src/chat/candidates.service';
 import { ChatService } from 'src/chat/chat.service';
 import { EventsService } from 'src/chat/events.service';
-import { MeetingsService } from 'src/meetings/meetings.service';
+import { meetingDraft } from 'src/meetings/meeting-draft';
+import { MeetingsService, OPEN_STATUSES } from 'src/meetings/meetings.service';
 import { MailerService } from 'src/outreach/mailer.service';
 import { OutreachService } from 'src/outreach/outreach.service';
 import { PrismaService } from 'src/prisma/prisma.service';
@@ -356,6 +357,75 @@ export class RepliesService implements OnModuleInit, OnModuleDestroy {
     return reply;
   }
 
+  // Setting a time replaces the booking link with an invite, so the draft has to say so
+  async setMeetingTime(
+    replyId: string,
+    userId: string,
+    startsAt: Date | null,
+    timeZone: string,
+  ) {
+    await this.findOwned(replyId, userId);
+
+    if (startsAt && startsAt.getTime() <= Date.now()) {
+      throw new BadRequestException('Pick a time in the future');
+    }
+
+    const reply = await this.prisma.candidateReply.findUniqueOrThrow({
+      where: { id: replyId },
+      include: {
+        meeting: true,
+        candidate: { include: { job: { include: { user: true } } } },
+        outboundEmail: {
+          include: { campaignStep: { include: { campaign: true } } },
+        },
+      },
+    });
+    const { meeting, candidate, outboundEmail } = reply;
+
+    if (
+      !meeting ||
+      !OPEN_STATUSES.includes(meeting.status) ||
+      reply.draftStatus !== ReplyDraftStatus.PENDING_APPROVAL
+    ) {
+      throw new ConflictException('This meeting can no longer be changed');
+    }
+
+    const draftBody = meetingDraft({
+      candidateName: candidate.name,
+      senderName:
+        outboundEmail?.campaignStep.campaign.senderName ??
+        candidate.job.user.name ??
+        candidate.job.user.email,
+      startsAt,
+      timeZone,
+    });
+
+    await this.prisma.$transaction([
+      this.prisma.meeting.update({
+        where: { id: meeting.id },
+        data: { startsAt },
+      }),
+      this.prisma.candidateReply.update({
+        where: { id: replyId },
+        data: { draftBody },
+      }),
+      // A chat card showing the old text must not overwrite the new one
+      this.prisma.pendingAction.updateMany({
+        where: {
+          replyId,
+          type: PendingActionType.APPROVE_REPLY,
+          status: PendingActionStatus.PENDING,
+        },
+        data: {
+          status: PendingActionStatus.CANCELLED,
+          resolvedAt: new Date(),
+        },
+      }),
+    ]);
+
+    return { draftBody };
+  }
+
   async updateDraft(replyId: string, userId: string, draftBody: string) {
     await this.findOwned(replyId, userId);
 
@@ -411,6 +481,7 @@ export class RepliesService implements OnModuleInit, OnModuleDestroy {
       },
     });
     const { candidate, outboundEmail, meeting } = reply;
+    const meetingTime = meeting?.startsAt ?? null;
 
     // They may have unsubscribed in a newer reply since this draft was approved
     if (
@@ -434,10 +505,20 @@ export class RepliesService implements OnModuleInit, OnModuleDestroy {
           candidate.job.user.name ??
           candidate.job.user.email,
         subject: replySubject(outboundEmail?.subject, candidate.job.title),
-        body: meeting
-          ? this.meetings.withBookingLink(reply.draftBody ?? '', meeting.token)
-          : (reply.draftBody ?? ''),
+        body:
+          meeting && !meetingTime
+            ? this.meetings.withBookingLink(reply.draftBody ?? '', meeting.token)
+            : (reply.draftBody ?? ''),
         inReplyTo: outboundEmail?.messageId ?? undefined,
+        recipientName: candidate.name,
+        invite:
+          meeting && meetingTime
+            ? {
+                uid: meeting.id,
+                summary: `${candidate.job.title} interview`,
+                startsAt: meetingTime,
+              }
+            : undefined,
       });
     } catch (error) {
       // Nothing was delivered, so handing it back for the retry is safe
@@ -468,8 +549,12 @@ export class RepliesService implements OnModuleInit, OnModuleDestroy {
       }),
     ]);
 
-    // The link only starts working now that the recruiter's email has gone out
-    if (meeting) await this.meetings.markLinkSent(meeting.id);
+    // The link and the time only count now that the recruiter's email has gone out
+    if (meeting && meetingTime) {
+      await this.meetings.confirmTime(meeting.id);
+    } else if (meeting) {
+      await this.meetings.markLinkSent(meeting.id);
+    }
 
     this.events.publish(reply.conversationId, { type: 'changed' });
   }

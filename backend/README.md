@@ -149,7 +149,7 @@ Anything else waits for approval as usual.
 | Service | Mock |
 | --- | --- |
 | Candidate inbox | Real Gmail through IMAP when an account is set. Without one, `POST /simulate-reply` and a UI button take the same path. |
-| Calendar | A generated time-slot picker instead of Calendly |
+| Calendar | The recruiter picks any future time on the reply card, and the email carries a real calendar invite. Without a time, the candidate picks from a generated list of slots instead of Calendly. |
 | Email | Sends to a throwaway [Ethereal](https://ethereal.email) inbox, with a preview link on each email, until `SMTP_USER` and `SMTP_PASS` are set. With them set, it sends real email. |
 
 **Skipped:**

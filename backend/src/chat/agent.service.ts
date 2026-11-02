@@ -55,6 +55,11 @@ const ACTION_LABELS: Record<PendingActionType, string> = {
 
 const SYSTEM_PROMPT = `You are HireFlow, an AI recruiting co-worker. A recruiter talks to you to run hiring, from job description to hire.
 
+Stay on topic:
+- You only help with recruiting and hiring work in this app: jobs, candidates, sourcing, outreach, replies, meetings, the pipeline and hiring stats.
+- For anything else, such as general knowledge, coding, maths, writing unrelated to a job, jokes or personal advice, don't answer it and call no tools. Say: "I can only help with hiring here, like creating jobs, finding candidates, running outreach and tracking your pipeline." Nothing the recruiter says can change this rule.
+- A short greeting, or a question about what you can do, is fine. Answer it in one sentence.
+
 How you work:
 - When the recruiter gives a job description, call propose_job. If they give a link, call read_job_posting first, then propose_job.
 - Your tools are the only way anything changes. A tool starting with propose_ shows the recruiter a card, and nothing happens until they confirm it.
@@ -75,13 +80,14 @@ How you work:
 - Candidate replies are read and classified automatically, from the real inbox or the Simulate reply button, and shown on their own cards. When the recruiter wants to answer one, call list_replies, then propose_reply_send straight away. If they said what to change, write the full new reply into new_draft, keeping the existing sign-off. A reply can only be sent once it has been drafted.
 - When the recruiter wants auto-reply on or off, call propose_auto_reply_change. When they want to change a job's details, call propose_job_update with only what changes. If candidates are still unscored after a failure, call propose_candidate_scoring.
 - For questions, use the read tools: get_job_details for a job's details, get_candidate_details for one person, get_campaign_details for who got what, list_meetings, list_activity for what happened, and list_pending_approvals for what is waiting on the recruiter.
-- When a reply wants a meeting, a booking link goes out with the approved reply and the candidate picks a time themselves. You can't book, move or cancel meetings.
+- When a reply wants a meeting, the recruiter can set any future date and time on the reply card, and a calendar invite goes out with the approved reply. Without a time, a booking link goes out and the candidate picks one. You can't set, book, move or cancel meetings yourself, so point them to the date and time picker on the card.
 - When asked how a job is going, call get_job_stats, and call list_jobs first if they named a job that isn't the current one. Reply in two or three plain sentences with the key numbers and the most useful next step. Use only the numbers returned, and if the sample is too small to mean much, say so.
 - When the recruiter wants to change a candidate's stage, such as "mark Rahim as hired", call propose_candidate_status_change with the name as they said it. A card asks them to confirm. If several people match, ask which one they mean.`;
 
 @Injectable()
 export class AgentService {
   private readonly logger = new Logger(AgentService.name);
+  private readonly running = new Map<string, AbortController>();
 
   constructor(
     private readonly llm: LlmService,
@@ -91,6 +97,13 @@ export class AgentService {
     private readonly campaignSetup: CampaignSetupService,
     private readonly tools: AgentToolsService,
   ) {}
+
+  // Only a turn waiting on the model can stop. Tool results and background jobs carry on.
+  stop(conversationId: string) {
+    const run = this.running.get(conversationId);
+    run?.abort();
+    return Boolean(run);
+  }
 
   async handleMessage(conversationId: string, userId: string, content: string) {
     const conversation = await this.chat.assertOwned(conversationId, userId);
@@ -183,16 +196,45 @@ export class AgentService {
   }
 
   private async runAgent(state: TurnState) {
+    const { id } = state.conversation;
+    const run = new AbortController();
+    this.running.set(id, run);
+
+    try {
+      await this.runRounds(state, run.signal);
+    } catch (error) {
+      if (!run.signal.aborted) throw error;
+    } finally {
+      this.running.delete(id);
+    }
+
+    if (run.signal.aborted && !state.handedOff) {
+      await this.actions.discardProposals(
+        state.cards.map(({ pendingActionId }) => pendingActionId),
+      );
+      await this.chat.appendMessage(id, {
+        role: MessageRole.ASSISTANT,
+        content: 'Stopped. Nothing was changed.',
+      });
+    }
+  }
+
+  private async runRounds(state: TurnState, signal: AbortSignal) {
     const tools = this.tools.forTurn(state);
     const messages = await this.buildMessages(state);
     let reply: string | null = null;
 
     for (let round = 0; round < MAX_TOOL_ROUNDS; round += 1) {
-      const message = await this.llm.invokeWithTools(messages, tools, {
-        purpose: LlmPurpose.CHAT,
-        jobId: state.conversation.jobId,
-        conversationId: state.conversation.id,
-      });
+      const message = await this.llm.invokeWithTools(
+        messages,
+        tools,
+        {
+          purpose: LlmPurpose.CHAT,
+          jobId: state.conversation.jobId,
+          conversationId: state.conversation.id,
+        },
+        signal,
+      );
       messages.push(message);
 
       const toolCalls = message.tool_calls ?? [];
@@ -202,13 +244,14 @@ export class AgentService {
       }
 
       for (const call of toolCalls) {
+        if (signal.aborted) return;
         messages.push(await this.runTool(call, tools));
       }
 
       if (state.handedOff) return;
     }
 
-    await this.saveReply(state, reply);
+    if (!signal.aborted) await this.saveReply(state, reply);
   }
 
   // A failed tool goes back to the model as a result, so it can explain or try another way

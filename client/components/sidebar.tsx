@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import {
   Activity,
   Briefcase,
+  CalendarCheck,
   LayoutDashboard,
   Mail,
   Menu,
@@ -23,6 +24,7 @@ const NAV_ITEMS: { label: string; icon: LucideIcon; href: string }[] = [
   { label: "Jobs", icon: Briefcase, href: "/jobs" },
   { label: "Candidates", icon: Users, href: "/candidates" },
   { label: "Campaigns", icon: Mail, href: "/campaigns" },
+  { label: "Meetings", icon: CalendarCheck, href: "/meetings" },
   { label: "Activity", icon: Activity, href: "/activity" },
 ];
 

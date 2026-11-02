@@ -10,7 +10,15 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { IsNotEmpty, IsString, IsUUID, MaxLength } from 'class-validator';
+import {
+  IsISO8601,
+  IsNotEmpty,
+  IsString,
+  IsTimeZone,
+  IsUUID,
+  MaxLength,
+  ValidateIf,
+} from 'class-validator';
 import { GetUser } from 'src/auth/decorators/get-user.decorator';
 import { DatabaseAuthGuard } from 'src/auth/guards/database-auth.guard';
 import { RepliesService } from './replies.service';
@@ -34,6 +42,15 @@ class UpdateReplyDraftDto {
   draftBody: string;
 }
 
+class SetMeetingTimeDto {
+  @ValidateIf((dto: SetMeetingTimeDto) => dto.startsAt !== null)
+  @IsISO8601({}, { message: 'That date and time is not valid' })
+  startsAt: string | null;
+
+  @IsTimeZone({ message: 'That timezone is not valid' })
+  timeZone: string;
+}
+
 @Controller()
 @UseGuards(DatabaseAuthGuard)
 export class RepliesController {
@@ -48,6 +65,20 @@ export class RepliesController {
   ) {
     await this.replies.receive(dto.candidateId, userId, dto.body.trim());
     return { success: true };
+  }
+
+  @Patch('replies/:id/meeting-time')
+  setMeetingTime(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: SetMeetingTimeDto,
+    @GetUser('id') userId: string,
+  ) {
+    return this.replies.setMeetingTime(
+      id,
+      userId,
+      dto.startsAt ? new Date(dto.startsAt) : null,
+      dto.timeZone,
+    );
   }
 
   @Patch('replies/:id/draft')

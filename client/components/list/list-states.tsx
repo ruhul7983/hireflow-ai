@@ -4,7 +4,7 @@ import Link from "next/link";
 import { secondaryButton } from "@/components/chat/action-buttons";
 import { useList } from "@/components/list/list-context";
 
-const FILTER_PARAMS = ["search", "status", "actor", "jobId"];
+const FILTER_PARAMS = ["search", "status", "actor", "jobId", "when"];
 
 type ListEmptyProps = {
   title: string;

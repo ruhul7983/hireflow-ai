@@ -106,6 +106,20 @@ export class ActionsService {
     });
   }
 
+  // A stopped turn never shows its cards, and an unseen card must not catch a later "yes"
+  async discardProposals(actionIds: string[]) {
+    await this.prisma.pendingAction.updateMany({
+      where: {
+        id: { in: actionIds },
+        status: PendingActionStatus.PENDING,
+      },
+      data: {
+        status: PendingActionStatus.CANCELLED,
+        resolvedAt: new Date(),
+      },
+    });
+  }
+
   // A new setup replaces any plan that hasn't been confirmed yet
   cancelOpenCampaignPlans(conversationId: string) {
     return this.supersede(conversationId, PendingActionType.CREATE_CAMPAIGN);

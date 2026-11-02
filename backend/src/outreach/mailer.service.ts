@@ -3,6 +3,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as nodemailer from 'nodemailer';
 import type { Transporter } from 'nodemailer';
+import { buildInvite } from './calendar-invite';
+import type { MeetingInvite } from './calendar-invite';
 
 const UNSUBSCRIBE_FOOTER =
   '\n\n--\nNot interested? Reply "unsubscribe" and we won\'t contact you again.';
@@ -15,6 +17,8 @@ export type OutgoingEmail = {
   subject: string;
   body: string;
   inReplyTo?: string;
+  recipientName?: string | null;
+  invite?: MeetingInvite;
 };
 
 @Injectable()
@@ -71,7 +75,15 @@ export class MailerService {
     return this.mailbox;
   }
 
-  async send({ to, senderName, subject, body, inReplyTo }: OutgoingEmail) {
+  async send({
+    to,
+    senderName,
+    subject,
+    body,
+    inReplyTo,
+    recipientName = null,
+    invite,
+  }: OutgoingEmail) {
     const { transporter, from } = await this.getMailbox();
 
     const info = await transporter.sendMail({
@@ -81,6 +93,16 @@ export class MailerService {
       text: `${body}${UNSUBSCRIBE_FOOTER}`,
       inReplyTo,
       references: inReplyTo,
+      // Sent as a real invite, so mail apps offer Yes, No and Maybe
+      icalEvent: invite && {
+        filename: 'invite.ics',
+        method: 'REQUEST',
+        content: buildInvite(
+          invite,
+          { name: senderName, email: from },
+          { name: recipientName, email: to },
+        ),
+      },
     });
 
     return {

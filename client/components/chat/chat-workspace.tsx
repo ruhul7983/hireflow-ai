@@ -2,19 +2,22 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent } from "react";
-import { Bot, Plus, SendHorizontal } from "lucide-react";
+import { Bot, Plus, SendHorizontal, Square } from "lucide-react";
+import { ConversationList } from "@/components/chat/conversation-list";
 import { MessageBubble } from "@/components/chat/message-bubble";
+import { useConversations } from "@/components/chat/use-conversations";
 import { api, errorMessage, refreshSession } from "@/lib/api";
 import type {
   ChatEvent,
   ChatMessage,
   Conversation,
-  ConversationSummary,
   SourcingRun,
 } from "@/lib/chat-types";
 
 const QUERY_KEY = "c";
 const PINNED_DISTANCE = 80;
+const MAX_INPUT_HEIGHT = 240;
+const LOAD_MORE = "load-more";
 
 function remember(conversationId: string) {
   const url = new URL(window.location.href);
@@ -52,25 +55,24 @@ function optimisticMessage(content: string): ChatMessage {
 }
 
 export function ChatWorkspace() {
-  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const chats = useConversations();
+  const { reload: reloadList } = chats;
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const [stopping, setStopping] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [streamKey, setStreamKey] = useState(0);
   const scrollerRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLOListElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const pinnedToBottom = useRef(true);
 
   const activeId = conversation?.id ?? null;
   const waitingQuestionId = conversation?.messages.find(
     ({ question }) => question?.status === "PENDING",
   )?.id;
-
-  const reloadList = useCallback(async () => {
-    setConversations(await api<ConversationSummary[]>("/chat/conversations"));
-  }, []);
 
   const open = useCallback(async (id: string) => {
     pinnedToBottom.current = true;
@@ -79,7 +81,7 @@ export function ChatWorkspace() {
   }, []);
 
   const startNew = useCallback(async () => {
-    const created = await api<ConversationSummary>("/chat/conversations", {
+    const created = await api<{ id: string }>("/chat/conversations", {
       method: "POST",
     });
     await open(created.id);
@@ -96,19 +98,21 @@ export function ChatWorkspace() {
   useEffect(() => {
     async function load() {
       try {
-        const list = await api<ConversationSummary[]>("/chat/conversations");
-        setConversations(list);
+        const list = await reloadList();
 
+        // Opened directly, because a linked chat can be past the first page of the list
         const requested = new URL(window.location.href).searchParams.get(QUERY_KEY);
-        const target = list.find(({ id }) => id === requested) ?? list[0];
-        await (target ? open(target.id) : startNew());
+        const opened = requested && (await open(requested).then(() => true, () => false));
+        if (opened) return;
+
+        await (list[0] ? open(list[0].id) : startNew());
       } catch (cause) {
         setError(errorMessage(cause));
       }
     }
 
     void load();
-  }, [open, startNew]);
+  }, [open, reloadList, startNew]);
 
   // Background jobs report here, so results appear without a refresh
   useEffect(() => {
@@ -161,6 +165,23 @@ export function ChatWorkspace() {
     scroller.scrollTop = scroller.scrollHeight;
   }, [waitingQuestionId]);
 
+  // Grows with the text up to a limit, then scrolls inside itself
+  useEffect(() => {
+    const input = inputRef.current;
+    const scroller = scrollerRef.current;
+    if (!input) return;
+
+    input.style.height = "auto";
+    input.style.height = `${Math.min(input.scrollHeight, MAX_INPUT_HEIGHT)}px`;
+    input.style.overflowY =
+      input.scrollHeight > MAX_INPUT_HEIGHT ? "auto" : "hidden";
+
+    // The messages lost that height, so keep the newest one in view
+    if (scroller && pinnedToBottom.current) {
+      scroller.scrollTop = scroller.scrollHeight;
+    }
+  }, [draft]);
+
   function handleScroll() {
     const scroller = scrollerRef.current;
     if (!scroller) return;
@@ -197,6 +218,19 @@ export function ChatWorkspace() {
       await refresh().catch(() => undefined);
     }
     setSending(false);
+    setStopping(false);
+  }
+
+  async function stop() {
+    if (!activeId) return;
+
+    setStopping(true);
+    try {
+      await api(`/chat/conversations/${activeId}/stop`, { method: "POST" });
+    } catch (cause) {
+      setStopping(false);
+      setError(errorMessage(cause));
+    }
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -217,6 +251,11 @@ export function ChatWorkspace() {
   }
 
   function handleOpen(id: string) {
+    if (id === LOAD_MORE) {
+      void chats.loadMore();
+      return;
+    }
+
     setError(null);
     open(id).catch((cause) => setError(errorMessage(cause)));
   }
@@ -234,26 +273,11 @@ export function ChatWorkspace() {
             New chat
           </button>
         </div>
-        <nav aria-label="Chats" className="flex-1 overflow-y-auto px-3 pb-3">
-          <ul className="space-y-1">
-            {conversations.map(({ id, title }) => (
-              <li key={id}>
-                <button
-                  type="button"
-                  onClick={() => handleOpen(id)}
-                  aria-current={id === activeId ? "true" : undefined}
-                  className={`w-full truncate rounded-lg px-3 py-2 text-left text-sm focus-visible:outline-2 focus-visible:outline-brand ${
-                    id === activeId
-                      ? "bg-brand-soft font-medium text-brand-strong"
-                      : "text-muted hover:bg-canvas hover:text-ink"
-                  }`}
-                >
-                  {title}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </nav>
+        <ConversationList
+          chats={chats}
+          activeId={activeId}
+          onOpen={handleOpen}
+        />
       </aside>
 
       <section className="flex min-w-0 flex-1 flex-col">
@@ -264,11 +288,15 @@ export function ChatWorkspace() {
             onChange={(event) => handleOpen(event.target.value)}
             className="min-w-0 flex-1 rounded-lg border border-muted/70 bg-surface px-2 py-2 text-sm"
           >
-            {conversations.map(({ id, title }) => (
+            {conversation && !chats.items.some(({ id }) => id === activeId) && (
+              <option value={conversation.id}>{conversation.title}</option>
+            )}
+            {chats.items.map(({ id, title }) => (
               <option key={id} value={id}>
                 {title}
               </option>
             ))}
+            {chats.hasMore && <option value={LOAD_MORE}>Load more chats…</option>}
           </select>
           <button
             type="button"
@@ -306,7 +334,9 @@ export function ChatWorkspace() {
                 >
                   <Bot className="size-4" />
                 </span>
-                <span className="text-sm text-muted">Thinking…</span>
+                <span className="text-sm text-muted">
+                  {stopping ? "Stopping…" : "Thinking…"}
+                </span>
               </li>
             )}
           </ol>
@@ -321,22 +351,35 @@ export function ChatWorkspace() {
             )}
             <div className="flex items-end gap-2 rounded-xl border border-muted/70 p-2 focus-within:border-brand focus-within:ring-3 focus-within:ring-brand/20">
               <textarea
+                ref={inputRef}
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}
                 onKeyDown={handleKeyDown}
-                rows={2}
+                rows={1}
                 aria-label="Message"
-                placeholder="Paste a job description, share a link, or ask anything"
-                className="max-h-40 min-w-0 flex-1 resize-none bg-transparent px-2 py-1 text-sm outline-none"
+                placeholder="Paste a job description, share a link, or ask about your hiring"
+                className="min-w-0 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none"
               />
-              <button
-                type="submit"
-                disabled={sending || !draft.trim() || !conversation}
-                aria-label="Send message"
-                className="rounded-lg bg-brand p-2.5 text-white hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:opacity-50"
-              >
-                <SendHorizontal className="size-4" aria-hidden />
-              </button>
+              {sending ? (
+                <button
+                  type="button"
+                  onClick={stop}
+                  disabled={stopping}
+                  aria-label="Stop"
+                  className="rounded-lg bg-ink p-2.5 text-white hover:bg-ink/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:opacity-50"
+                >
+                  <Square className="size-4 fill-current" aria-hidden />
+                </button>
+              ) : (
+                <button
+                  type="submit"
+                  disabled={!draft.trim() || !conversation}
+                  aria-label="Send message"
+                  className="rounded-lg bg-brand p-2.5 text-white hover:bg-brand-strong focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-brand disabled:opacity-50"
+                >
+                  <SendHorizontal className="size-4" aria-hidden />
+                </button>
+              )}
             </div>
           </div>
         </form>

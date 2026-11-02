@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CalendarCheck } from "lucide-react";
 import { AutoReplyToggle } from "@/components/jobs/auto-reply-toggle";
 import {
   DataTable,
@@ -66,7 +67,16 @@ export function JobsTable({ jobs }: { jobs: JobRow[] }) {
           </td>
           <td className={numericCell}>{formatPercentage(job.replyRate)}</td>
           <td className={numericCell}>{formatPercentage(job.interestedRate)}</td>
-          <td className={numericCell}>{job.funnel.meetings}</td>
+          <td className={numericCell}>
+            <Link
+              href={`/meetings?jobId=${job.id}`}
+              aria-label={`View ${job.funnel.meetings} meetings for ${job.title}`}
+              className="inline-flex items-center gap-1.5 rounded-md border border-line px-2 py-1 font-medium text-brand-strong hover:bg-brand-soft focus-visible:outline-2 focus-visible:outline-brand"
+            >
+              <CalendarCheck className="size-3.5" aria-hidden />
+              {job.funnel.meetings}
+            </Link>
+          </td>
           <td className={numericCell}>{job.funnel.hired}</td>
           <td className={numericCell}>
             <Link href={`/campaigns?jobId=${job.id}`} className={tableLink}>

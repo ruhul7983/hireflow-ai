@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { CircleAlert, ExternalLink, LoaderCircle } from "lucide-react";
 import { ActionButtons } from "@/components/chat/action-buttons";
+import { MeetingTimeField } from "@/components/chat/meeting-time-field";
 import { api, errorMessage } from "@/lib/api";
 import type {
   CandidateReply,
@@ -51,9 +52,34 @@ function ReplyDraft({ reply, action, onChanged }: ReplyDraftProps) {
   const [draft, setDraft] = useState(reply.draftBody ?? "");
   const [error, setError] = useState<string | null>(null);
   const saving = useRef<Promise<unknown>>(Promise.resolve());
+  const timeFailure = useRef<unknown>(null);
 
   const isOpen =
     reply.draftStatus === "PENDING_APPROVAL" && action?.status === "PENDING";
+  const canSetTime =
+    isOpen &&
+    (reply.meeting?.status === "DRAFTED" ||
+      reply.meeting?.status === "LINK_SENT");
+
+  function saveTime(startsAt: string | null) {
+    setError(null);
+    timeFailure.current = null;
+    saving.current = api<{ draftBody: string }>(
+      `/replies/${reply.id}/meeting-time`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          startsAt,
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
+      },
+    )
+      .then(({ draftBody }) => setDraft(draftBody))
+      .catch((cause) => {
+        timeFailure.current = cause;
+        setError(errorMessage(cause));
+      });
+  }
 
   function save() {
     if (draft === reply.draftBody) return;
@@ -88,7 +114,15 @@ function ReplyDraft({ reply, action, onChanged }: ReplyDraftProps) {
         </p>
       )}
 
-      {reply.meeting && (
+      {canSetTime && reply.meeting && (
+        <MeetingTimeField
+          id={`${reply.id}-time`}
+          startsAt={reply.meeting.startsAt}
+          onChange={saveTime}
+        />
+      )}
+
+      {reply.meeting && !canSetTime && reply.meeting.status !== "BOOKED" && (
         <p className="text-sm text-muted">
           {reply.meeting.status === "DRAFTED" ? (
             "A private booking link is added below your message when it's sent."
@@ -114,6 +148,8 @@ function ReplyDraft({ reply, action, onChanged }: ReplyDraftProps) {
           disabled={!draft.trim()}
           beforeConfirm={async () => {
             await saving.current;
+            // Sending would otherwise promise a time that was never saved
+            if (timeFailure.current) throw timeFailure.current;
           }}
           onChanged={onChanged}
         />

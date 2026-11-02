@@ -87,10 +87,11 @@ export class LlmService {
     messages: BaseMessage[],
     tools: StructuredToolInterface[],
     scope: LlmScope,
+    signal?: AbortSignal,
   ): Promise<AIMessage> {
     const message = await this.chatModel
       .bindTools(tools, { strict: true })
-      .invoke(messages);
+      .invoke(messages, { signal });
 
     await this.record(
       scope,

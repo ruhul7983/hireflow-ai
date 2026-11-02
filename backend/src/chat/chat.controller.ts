@@ -35,6 +35,7 @@ import {
   ActivityQueryDto,
   AnswerQuestionDto,
   CandidateQueryDto,
+  ConversationQueryDto,
   DecideCandidateDto,
   SendMessageDto,
   UpdateCandidateStatusDto,
@@ -63,8 +64,11 @@ export class ChatController {
   ) {}
 
   @Get('chat/conversations')
-  listConversations(@GetUser('id') userId: string) {
-    return this.chat.listConversations(userId);
+  listConversations(
+    @GetUser('id') userId: string,
+    @Query() query: ConversationQueryDto,
+  ) {
+    return this.chat.listConversations(userId, query);
   }
 
   @Post('chat/conversations')
@@ -89,6 +93,16 @@ export class ChatController {
   ) {
     await this.agent.handleMessage(id, userId, dto.content.trim());
     return this.chat.getConversation(id, userId);
+  }
+
+  @Post('chat/conversations/:id/stop')
+  @HttpCode(HttpStatus.OK)
+  async stopMessage(
+    @Param('id', ParseUUIDPipe) id: string,
+    @GetUser('id') userId: string,
+  ) {
+    await this.chat.assertOwned(id, userId);
+    return { stopped: this.agent.stop(id) };
   }
 
   @Sse('chat/conversations/:id/events')

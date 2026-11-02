@@ -24,7 +24,7 @@ Open <http://localhost:3000> and sign in with the admin account from the backend
 | --- | --- |
 | `/chat` | The main workspace, with interactive cards and live progress over SSE |
 | `/` | Dashboard with the funnel, reply rate, interested rate, meetings and hires per job |
-| `/jobs`, `/candidates`, `/campaigns`, `/activity` | Lists with server-side pagination, search and filters |
+| `/jobs`, `/candidates`, `/campaigns`, `/meetings`, `/activity` | Lists with server-side pagination, search and filters |
 | `/book/[token]` | Public booking page for candidates |
 | `/login` | Sign in |
 

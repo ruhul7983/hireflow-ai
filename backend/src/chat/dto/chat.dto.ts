@@ -20,6 +20,16 @@ import { JobPageQueryDto } from 'src/common/pagination';
 const MAX_MESSAGE_LENGTH = 20_000;
 const MAX_SKILLS = 30;
 
+export class ConversationQueryDto {
+  @IsOptional()
+  @Matches(/^[\d\-:.TZ]+_[\da-f-]+$/, { message: 'That cursor is not valid' })
+  cursor?: string;
+
+  @IsOptional()
+  @IsIn(['all', 'jobs'], { message: 'That list is not valid' })
+  scope?: 'all' | 'jobs';
+}
+
 export class SendMessageDto {
   @IsString()
   @IsNotEmpty({ message: 'Message cannot be empty' })

@@ -5,6 +5,13 @@ export type ConversationSummary = {
   updatedAt: string;
 };
 
+export type ConversationPage = {
+  items: ConversationSummary[];
+  nextCursor: string | null;
+};
+
+export type ConversationScope = "all" | "jobs";
+
 export type RemotePolicy = "ONSITE" | "HYBRID" | "REMOTE";
 
 export type JobFields = {
@@ -93,7 +100,7 @@ export type AgentQuestion = {
   }[];
 };
 
-type MeetingStatus =
+export type MeetingStatus =
   | "DRAFTED"
   | "LINK_SENT"
   | "BOOKED"
@@ -139,7 +146,11 @@ export type CandidateReply = {
   previewUrl: string | null;
   error: string | null;
   candidate: { id: string; name: string | null; email: string | null };
-  meeting: { status: MeetingStatus; token: string } | null;
+  meeting: {
+    status: MeetingStatus;
+    token: string;
+    startsAt: string | null;
+  } | null;
 };
 
 export type ChatMessage = {

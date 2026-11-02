@@ -12,10 +12,13 @@ import {
   CardType,
   MeetingStatus,
   MessageRole,
+  Prisma,
 } from '@prisma/client';
 import { randomBytes } from 'crypto';
+import { nextStatuses } from 'src/chat/candidate-status';
 import { CandidatesService } from 'src/chat/candidates.service';
 import { ChatService } from 'src/chat/chat.service';
+import { containsText, JobPageQueryDto, paginate } from 'src/common/pagination';
 import { PrismaService } from 'src/prisma/prisma.service';
 import { upcomingSlots } from './booking-slots';
 
@@ -29,10 +32,13 @@ const BOOKABLE_FROM: CandidateStatus[] = [
   CandidateStatus.NOT_INTERESTED,
 ];
 
-const OPEN_STATUSES: MeetingStatus[] = [
+export const OPEN_STATUSES: MeetingStatus[] = [
   MeetingStatus.DRAFTED,
   MeetingStatus.LINK_SENT,
 ];
+
+export const MEETING_WINDOWS = ['upcoming', 'past'] as const;
+export type MeetingWindow = (typeof MEETING_WINDOWS)[number];
 
 @Injectable()
 export class MeetingsService {
@@ -55,6 +61,82 @@ export class MeetingsService {
   // Added by code, so the model can't invent a link and an edit can't break it
   withBookingLink(body: string, token: string) {
     return `${body}\n\nPick a time here: ${this.bookingUrl(token)}`;
+  }
+
+  // Upcoming reads soonest first. Everything else reads most recent first.
+  async list(
+    userId: string,
+    query: JobPageQueryDto & { status?: MeetingStatus; when?: MeetingWindow },
+  ) {
+    const { search, status, jobId, when } = query;
+    const text = search ? containsText(search) : undefined;
+    const now = new Date();
+
+    const where: Prisma.MeetingWhereInput = {
+      status,
+      candidate: {
+        jobId,
+        job: { userId },
+        ...(text && {
+          OR: [
+            { name: text },
+            { email: text },
+            { job: { title: text } },
+          ],
+        }),
+      },
+      ...(when === 'upcoming' && {
+        startsAt: { gte: now },
+        status: status ?? MeetingStatus.BOOKED,
+      }),
+      ...(when === 'past' && { startsAt: { lt: now } }),
+    };
+
+    const page = await paginate(
+      query,
+      await this.prisma.meeting.count({ where }),
+      (range) =>
+        this.prisma.meeting.findMany({
+          ...range,
+          where,
+          orderBy: [
+            {
+              startsAt: {
+                sort: when === 'upcoming' ? 'asc' : 'desc',
+                nulls: 'last',
+              },
+            },
+            { createdAt: 'desc' },
+            { id: 'asc' },
+          ],
+          select: {
+            id: true,
+            status: true,
+            startsAt: true,
+            conversationId: true,
+            candidate: {
+              select: {
+                id: true,
+                name: true,
+                email: true,
+                status: true,
+                job: { select: { id: true, title: true } },
+              },
+            },
+          },
+        }),
+    );
+
+    return {
+      ...page,
+      items: page.items.map((meeting) => ({
+        ...meeting,
+        candidate: {
+          ...meeting.candidate,
+          nextStatuses: nextStatuses(meeting.candidate.status),
+        },
+      })),
+    };
   }
 
   async hasBookedMeeting(candidateId: string) {
@@ -94,6 +176,66 @@ export class MeetingsService {
     await this.prisma.meeting.updateMany({
       where: { id: meetingId, status: MeetingStatus.DRAFTED },
       data: { status: MeetingStatus.LINK_SENT },
+    });
+  }
+
+  // Runs once the recruiter's email has gone out, so the time is never promised early
+  async confirmTime(meetingId: string) {
+    const { count } = await this.prisma.meeting.updateMany({
+      where: { id: meetingId, status: { in: OPEN_STATUSES } },
+      data: { status: MeetingStatus.BOOKED },
+    });
+    if (count === 0) return;
+
+    const meeting = await this.prisma.meeting.findUniqueOrThrow({
+      where: { id: meetingId },
+      include: { candidate: true },
+    });
+    const name = meeting.candidate.name ?? 'the candidate';
+
+    await this.recordBooking(
+      meeting,
+      ActivityActor.RECRUITER,
+      `Set a meeting with ${name}`,
+      `The meeting with ${name} is set, and the invite has gone out.`,
+    );
+  }
+
+  private async recordBooking(
+    meeting: {
+      id: string;
+      conversationId: string;
+      candidate: Parameters<CandidatesService['changeStatus']>[0];
+    },
+    actor: ActivityActor,
+    summary: string,
+    content: string,
+  ) {
+    const { candidate } = meeting;
+
+    if (BOOKABLE_FROM.includes(candidate.status)) {
+      await this.candidates.changeStatus(
+        candidate,
+        CandidateStatus.MEETING_BOOKED,
+        actor,
+      );
+    }
+
+    await this.prisma.activityLog.create({
+      data: {
+        jobId: candidate.jobId,
+        candidateId: candidate.id,
+        actor,
+        type: ActivityType.MEETING_BOOKED,
+        summary,
+      },
+    });
+
+    await this.chat.appendMessage(meeting.conversationId, {
+      role: MessageRole.ASSISTANT,
+      content,
+      cardType: CardType.MEETING_BOOKED,
+      meetingId: meeting.id,
     });
   }
 
@@ -189,30 +331,13 @@ export class MeetingsService {
       throw new ConflictException('This meeting has already been booked');
     }
 
-    if (BOOKABLE_FROM.includes(candidate.status)) {
-      await this.candidates.changeStatus(
-        candidate,
-        CandidateStatus.MEETING_BOOKED,
-        ActivityActor.SYSTEM,
-      );
-    }
-
-    await this.prisma.activityLog.create({
-      data: {
-        jobId: candidate.jobId,
-        candidateId: candidate.id,
-        actor: ActivityActor.SYSTEM,
-        type: ActivityType.MEETING_BOOKED,
-        summary: `${candidate.name ?? 'A candidate'} booked a meeting`,
-      },
-    });
-
-    await this.chat.appendMessage(meeting.conversationId, {
-      role: MessageRole.ASSISTANT,
-      content: `${candidate.name ?? 'A candidate'} booked a meeting.`,
-      cardType: CardType.MEETING_BOOKED,
-      meetingId: meeting.id,
-    });
+    const booked = `${candidate.name ?? 'A candidate'} booked a meeting`;
+    await this.recordBooking(
+      meeting,
+      ActivityActor.SYSTEM,
+      booked,
+      `${booked}.`,
+    );
 
     return this.publicView(token);
   }

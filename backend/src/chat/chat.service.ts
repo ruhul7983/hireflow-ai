@@ -2,6 +2,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { MessageRole, Prisma } from '@prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
+import { ConversationQueryDto } from './dto/chat.dto';
 import { EventsService } from './events.service';
 
 const GREETING =
@@ -9,6 +10,7 @@ const GREETING =
 
 const DEFAULT_TITLE = 'New chat';
 const TITLE_LENGTH = 50;
+const CONVERSATIONS_PER_PAGE = 30;
 
 // Everything a card needs. Cards render from these live rows, not from a stored snapshot.
 const MESSAGE_INCLUDE = {
@@ -19,7 +21,7 @@ const MESSAGE_INCLUDE = {
   reply: {
     include: {
       candidate: { select: { id: true, name: true, email: true } },
-      meeting: { select: { status: true, token: true } },
+      meeting: { select: { status: true, token: true, startsAt: true } },
     },
   },
   meeting: {
@@ -53,12 +55,41 @@ export class ChatService {
     private readonly events: EventsService,
   ) {}
 
-  listConversations(userId: string) {
-    return this.prisma.conversation.findMany({
-      where: { userId },
-      orderBy: { updatedAt: 'desc' },
+  // A cursor rather than page numbers, because a new message moves a chat to the top
+  // and would otherwise make the next page skip or repeat rows
+  async listConversations(
+    userId: string,
+    { cursor, scope }: ConversationQueryDto,
+  ) {
+    const [updatedAt, id] = cursor?.split('_') ?? [];
+    const after = cursor ? new Date(updatedAt) : null;
+
+    const rows = await this.prisma.conversation.findMany({
+      where: {
+        userId,
+        ...(scope === 'jobs' && { jobId: { not: null } }),
+        ...(after && {
+          OR: [
+            { updatedAt: { lt: after } },
+            { updatedAt: after, id: { lt: id } },
+          ],
+        }),
+      },
+      orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+      take: CONVERSATIONS_PER_PAGE + 1,
       select: { id: true, title: true, jobId: true, updatedAt: true },
     });
+
+    const items = rows.slice(0, CONVERSATIONS_PER_PAGE);
+    const last = items[items.length - 1];
+
+    return {
+      items,
+      nextCursor:
+        rows.length > CONVERSATIONS_PER_PAGE
+          ? `${last.updatedAt.toISOString()}_${last.id}`
+          : null,
+    };
   }
 
   createConversation(userId: string) {
