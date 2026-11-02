@@ -2,7 +2,7 @@
 
 The web app for HireFlow AI, a chat-first AI recruiting co-worker. It is built with Next.js 16, React 19, TypeScript and Tailwind CSS.
 
-The architecture, agent design, trade-offs and what is mocked are in the [backend README](../backend/README.md).
+The full documentation is in the [main README](../README.md), including the feature flow, the LangChain agent, human in the loop and trade-offs.
 
 ## Run it
 
